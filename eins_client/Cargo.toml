@@ -1,5 +1,5 @@
 [package]
-name = "oxy_uno_client"
+name = "eins_client"
 version = "0.1.0"
 authors = ["Torben Clasen <t.clasen@outlook.com>"]
 edition = "2018"

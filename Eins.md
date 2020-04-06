@@ -1,4 +1,4 @@
-Uno
+Uno (Eins)
 108 Karten insgesamt
 Spielkarten:
 -Farben:
