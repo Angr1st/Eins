@@ -1,4 +1,5 @@
-Uno (Eins)
+# Uno (Eins)
+
 108 Karten insgesamt
 Spielkarten:
 -Farben:
@@ -30,3 +31,7 @@ Spielkarten:
 -DrawAction:
     -DrawTwo
     -DrawFour
+
+## StateMachines:
+-Server (Starting up, Setting up the Deck etc., Starting a new Game Session)
+-Game
