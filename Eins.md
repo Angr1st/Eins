@@ -34,4 +34,6 @@ Spielkarten:
 
 ## StateMachines:
 -Server (Starting up, Setting up the Deck etc., Starting a new Game Session)
--Game
+-Game (Setup (number of players), Begin (giving out cards), Start(random who starts if new; otherwise move clockwise), Progress (Rounds State Machine), End(Show Stats)
+-Rounds ()
+-Turn
