@@ -124,45 +124,45 @@ pub mod cards {
         }
         cards
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use crate::cards::{CardTypes, Color, ColorCard, ColorSymbol, WildCard, WildSymbol};
-    #[test]
-    fn number_is_108() {
-        assert_eq!(108, crate::cards::MAX_CARD_NUMBER);
-    }
-
-    #[test]
-    fn for_loop() {
-        let mut current = 0;
-        for _ in 0..4 {
-            current = current + 1;
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        #[test]
+        fn number_is_108() {
+            assert_eq!(108, MAX_CARD_NUMBER);
         }
-        assert_eq!(4, current);
-    }
 
-    #[test]
-    fn check_deck() {
-        let deck = crate::cards::init_deck();
-        let first_card = CardTypes::Wild(WildCard {
-            symbol: WildSymbol::ChooseColor,
-        });
-        let last_card = CardTypes::Normal(ColorCard {
-            color: Color::Orange,
-            symbol: ColorSymbol::Reverse,
-        });
+        #[test]
+        fn for_loop() {
+            let mut current = 0;
+            for _ in 0..4 {
+                current = current + 1;
+            }
+            assert_eq!(4, current);
+        }
 
-        let first_deck_card = match deck.first() {
-            Some(it) => it,
-            _ => return,
-        };
-        assert_eq!(first_deck_card, &first_card);
-        let last_deck_card = match deck.last() {
-            Some(it) => it,
-            _ => return,
-        };
-        assert_eq!(last_deck_card, &last_card);
+        #[test]
+        fn check_deck() {
+            let deck = init_deck();
+            let first_card = CardTypes::Wild(WildCard {
+                symbol: WildSymbol::ChooseColor,
+            });
+            let last_card = CardTypes::Normal(ColorCard {
+                color: Color::Orange,
+                symbol: ColorSymbol::Reverse,
+            });
+
+            let first_deck_card = match deck.first() {
+                Some(it) => it,
+                _ => return,
+            };
+            assert_eq!(first_deck_card, &first_card);
+            let last_deck_card = match deck.last() {
+                Some(it) => it,
+                _ => return,
+            };
+            assert_eq!(last_deck_card, &last_card);
+        }
     }
 }
