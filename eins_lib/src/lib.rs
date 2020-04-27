@@ -1,21 +1,16 @@
-#[macro_use]
-extern crate specs_derive;
-
 pub mod cards {
-    use specs::prelude::*;
+    pub const MAX_CARD_NUMBER: usize = 108;
 
-    pub const MAX_CARD_NUMBER: i32 = 108;
-
-    #[derive(Debug)]
-    pub enum Color{
+    #[derive(Debug, PartialEq,Copy,Clone)]
+    pub enum Color {
         Red,
         Blue,
         Orange,
-        Green
+        Green,
     }
 
-    #[derive(Debug)]
-    pub enum CardNumbers {
+    #[derive(Debug, PartialEq)]
+    pub enum ColorSymbol {
         Zero,
         One,
         Two,
@@ -25,51 +20,139 @@ pub mod cards {
         Six,
         Seven,
         Eight,
-        Nine
-    }
-
-    #[derive(Debug)]
-    pub enum Symbol{
-        Number(CardNumbers),
-        Draw,
-        Wild,
+        Nine,
+        DrawTwo,
         Reverse,
-        Skip
+        Skip,
     }
 
-    #[derive(Component)]
-    pub struct Reversable {}
-
-    #[derive(Component)]
-    pub struct Skip {}
-
-    #[derive(Component)]
-    pub struct Wild {
-        pub next_color: Color
+    #[derive(Debug, PartialEq)]
+    pub enum WildSymbol {
+        ChooseColor,
+        DrawFour,
     }
 
-    #[derive(Component)]
-    pub struct Drawable {
-        pub number_of_cards_to_draw: DrawAction
+    #[derive(Debug, PartialEq)]
+    pub enum CardTypes {
+        Normal(ColorCard),
+        Wild(WildCard),
     }
 
     #[derive(Debug)]
-    pub enum DrawAction{
+    pub enum DrawAction {
         DrawOne,
         DrawTwo,
-        DrawFour
+        DrawFour,
     }
 
-    #[derive(Debug)]
-    pub enum Category{
+    #[derive(Debug,PartialEq)]
+    pub struct ColorCard {
+        pub color: Color,
+        pub symbol: ColorSymbol,
+    }
 
+    #[derive(Debug, PartialEq)]
+    pub struct WildCard {
+        pub symbol: WildSymbol,
+    }
+
+    pub fn init_deck() -> Vec<CardTypes> {
+        let mut cards = Vec::with_capacity(MAX_CARD_NUMBER);
+        for _ in 0..4 {
+            cards.push(CardTypes::Wild(WildCard {
+                symbol: WildSymbol::ChooseColor,
+            }));
+        }
+        for _ in 0..4 {
+            cards.push(CardTypes::Wild(WildCard {
+                symbol: WildSymbol::DrawFour,
+            }));
+        }
+        for color in [Color::Red, Color::Blue, Color::Green, Color::Orange].iter() {
+            cards.push(CardTypes::Normal(ColorCard {
+                color: *color,
+                symbol: ColorSymbol::Zero
+            }));
+            cards.push(CardTypes::Normal(ColorCard {
+                color: *color,
+                symbol: ColorSymbol::One
+            }));
+            cards.push(CardTypes::Normal(ColorCard {
+                color: *color,
+                symbol: ColorSymbol::Two
+            }));
+            cards.push(CardTypes::Normal(ColorCard {
+                color: *color,
+                symbol: ColorSymbol::Three
+            }));
+            cards.push(CardTypes::Normal(ColorCard {
+                color: *color,
+                symbol: ColorSymbol::Four
+            }));
+            cards.push(CardTypes::Normal(ColorCard {
+                color: *color,
+                symbol: ColorSymbol::Five
+            }));
+            cards.push(CardTypes::Normal(ColorCard {
+                color: *color,
+                symbol: ColorSymbol::Six
+            }));
+            cards.push(CardTypes::Normal(ColorCard {
+                color: *color,
+                symbol: ColorSymbol::Seven
+            }));
+            cards.push(CardTypes::Normal(ColorCard {
+                color: *color,
+                symbol: ColorSymbol::Eight
+            }));
+            cards.push(CardTypes::Normal(ColorCard {
+                color: *color,
+                symbol: ColorSymbol::Nine
+            }));
+            cards.push(CardTypes::Normal(ColorCard {
+                color: *color,
+                symbol: ColorSymbol::DrawTwo
+            }));
+            cards.push(CardTypes::Normal(ColorCard {
+                color: *color,
+                symbol: ColorSymbol::Skip
+            }));
+            cards.push(CardTypes::Normal(ColorCard {
+                color: *color,
+                symbol: ColorSymbol::Reverse
+            }));
+        }
+        cards
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::cards::{CardTypes, ColorSymbol, Color, ColorCard};
     #[test]
     fn number_is_108() {
         assert_eq!(108, crate::cards::MAX_CARD_NUMBER);
+    }
+
+    #[test]
+    fn for_loop() {
+        let mut current = 0;
+        for _ in 0..4 {
+            current = current + 1;
+        }
+        assert_eq!(4, current);
+    }
+
+    #[test]
+    fn check_deck() {
+        let deck = crate::cards::init_deck();
+        let last_card = CardTypes::Normal(ColorCard {
+            color:Color::Orange,
+            symbol: ColorSymbol::Reverse
+        });
+        if let Some(card) = deck.last() {
+            assert_eq!(card, &last_card);
+        }
+        
     }
 }
