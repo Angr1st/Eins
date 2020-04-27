@@ -1,7 +1,7 @@
 pub mod cards {
     pub const MAX_CARD_NUMBER: usize = 108;
 
-    #[derive(Debug, PartialEq,Copy,Clone)]
+    #[derive(Debug, PartialEq, Copy, Clone)]
     pub enum Color {
         Red,
         Blue,
@@ -45,7 +45,7 @@ pub mod cards {
         DrawFour,
     }
 
-    #[derive(Debug,PartialEq)]
+    #[derive(Debug, PartialEq)]
     pub struct ColorCard {
         pub color: Color,
         pub symbol: ColorSymbol,
@@ -71,55 +71,55 @@ pub mod cards {
         for color in [Color::Red, Color::Blue, Color::Green, Color::Orange].iter() {
             cards.push(CardTypes::Normal(ColorCard {
                 color: *color,
-                symbol: ColorSymbol::Zero
+                symbol: ColorSymbol::Zero,
             }));
             cards.push(CardTypes::Normal(ColorCard {
                 color: *color,
-                symbol: ColorSymbol::One
+                symbol: ColorSymbol::One,
             }));
             cards.push(CardTypes::Normal(ColorCard {
                 color: *color,
-                symbol: ColorSymbol::Two
+                symbol: ColorSymbol::Two,
             }));
             cards.push(CardTypes::Normal(ColorCard {
                 color: *color,
-                symbol: ColorSymbol::Three
+                symbol: ColorSymbol::Three,
             }));
             cards.push(CardTypes::Normal(ColorCard {
                 color: *color,
-                symbol: ColorSymbol::Four
+                symbol: ColorSymbol::Four,
             }));
             cards.push(CardTypes::Normal(ColorCard {
                 color: *color,
-                symbol: ColorSymbol::Five
+                symbol: ColorSymbol::Five,
             }));
             cards.push(CardTypes::Normal(ColorCard {
                 color: *color,
-                symbol: ColorSymbol::Six
+                symbol: ColorSymbol::Six,
             }));
             cards.push(CardTypes::Normal(ColorCard {
                 color: *color,
-                symbol: ColorSymbol::Seven
+                symbol: ColorSymbol::Seven,
             }));
             cards.push(CardTypes::Normal(ColorCard {
                 color: *color,
-                symbol: ColorSymbol::Eight
+                symbol: ColorSymbol::Eight,
             }));
             cards.push(CardTypes::Normal(ColorCard {
                 color: *color,
-                symbol: ColorSymbol::Nine
+                symbol: ColorSymbol::Nine,
             }));
             cards.push(CardTypes::Normal(ColorCard {
                 color: *color,
-                symbol: ColorSymbol::DrawTwo
+                symbol: ColorSymbol::DrawTwo,
             }));
             cards.push(CardTypes::Normal(ColorCard {
                 color: *color,
-                symbol: ColorSymbol::Skip
+                symbol: ColorSymbol::Skip,
             }));
             cards.push(CardTypes::Normal(ColorCard {
                 color: *color,
-                symbol: ColorSymbol::Reverse
+                symbol: ColorSymbol::Reverse,
             }));
         }
         cards
@@ -128,7 +128,7 @@ pub mod cards {
 
 #[cfg(test)]
 mod tests {
-    use crate::cards::{CardTypes, ColorSymbol, Color, ColorCard};
+    use crate::cards::{CardTypes, Color, ColorCard, ColorSymbol};
     #[test]
     fn number_is_108() {
         assert_eq!(108, crate::cards::MAX_CARD_NUMBER);
@@ -147,12 +147,13 @@ mod tests {
     fn check_deck() {
         let deck = crate::cards::init_deck();
         let last_card = CardTypes::Normal(ColorCard {
-            color:Color::Orange,
-            symbol: ColorSymbol::Reverse
+            color: Color::Orange,
+            symbol: ColorSymbol::Reverse,
         });
-        if let Some(card) = deck.last() {
-            assert_eq!(card, &last_card);
-        }
-        
+        let card = match deck.last() {
+            Some(it) => it,
+            _ => return,
+        };
+        assert_eq!(card, &last_card);
     }
 }
