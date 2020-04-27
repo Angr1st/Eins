@@ -128,7 +128,7 @@ pub mod cards {
 
 #[cfg(test)]
 mod tests {
-    use crate::cards::{CardTypes, Color, ColorCard, ColorSymbol};
+    use crate::cards::{CardTypes, Color, ColorCard, ColorSymbol, WildCard, WildSymbol};
     #[test]
     fn number_is_108() {
         assert_eq!(108, crate::cards::MAX_CARD_NUMBER);
@@ -146,14 +146,23 @@ mod tests {
     #[test]
     fn check_deck() {
         let deck = crate::cards::init_deck();
+        let first_card = CardTypes::Wild(WildCard {
+            symbol: WildSymbol::ChooseColor,
+        });
         let last_card = CardTypes::Normal(ColorCard {
             color: Color::Orange,
             symbol: ColorSymbol::Reverse,
         });
-        let card = match deck.last() {
+
+        let first_deck_card = match deck.first() {
             Some(it) => it,
             _ => return,
         };
-        assert_eq!(card, &last_card);
+        assert_eq!(first_deck_card, &first_card);
+        let last_deck_card = match deck.last() {
+            Some(it) => it,
+            _ => return,
+        };
+        assert_eq!(last_deck_card, &last_card);
     }
 }
