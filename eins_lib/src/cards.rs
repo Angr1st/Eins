@@ -3,11 +3,10 @@ pub const MAX_CARD_NUMBER: usize = 108;
 pub struct CardReference(usize);
 
 impl CardReference {
-    fn new(card_number:usize) -> Option<CardReference> {
+    fn new(card_number: usize) -> Option<CardReference> {
         if card_number > MAX_CARD_NUMBER {
             None
-        }
-        else {
+        } else {
             Some(CardReference(card_number))
         }
     }
@@ -186,7 +185,7 @@ mod tests {
         let zero = CardReference::new(0);
         match zero {
             Some(card_ref) => assert_eq!(card_ref.card_number(), 0),
-            None => return
+            None => return,
         }
 
         let invalid_card_ref = CardReference::new(MAX_CARD_NUMBER + 1);
