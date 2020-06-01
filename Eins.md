@@ -35,5 +35,5 @@ Spielkarten:
 ## StateMachines:
 -Server (Starting up, Setting up the Deck etc., Starting a new Game Session)
 -Game (Setup (number of players), Begin (giving out cards), Start(random who starts if new; otherwise move clockwise), Progress (Rounds State Machine), End(Show Stats))
--Rounds (Init, NextPlayer, Turn StateMachine, Evaluate Effect)
--Turn (Skipped, Draw, PlayCard)
+-Turn (Init, NextPlayer, Turn StateMachine, Evaluate Effect) -- Ignore Rounds and focus on Turns
+-TurnState (Skipped, Draw, PlayCard) --What happens on a turn in a general fashion. Skipped directly starts the turn again for the next player. Draw used when a player decides not to play a card but has to draw n cards. PlayCard is used when a player plays a card.
