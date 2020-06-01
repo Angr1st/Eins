@@ -8,6 +8,18 @@ pub struct game_session {
 
 pub struct hand {
     player_id:Guid,
-    held_cards:Vec<CardReference>
+    held_cards:Vec<CardReference>,
+    status:HandState
+}
+
+pub enum HandState {
+    Playing,
+    Won
+}
+
+pub enum TurnState {
+    Draw,
+    Play_Card,
+    Skip
 }
 
