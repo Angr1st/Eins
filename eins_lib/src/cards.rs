@@ -1,3 +1,5 @@
+use rand::{seq::SliceRandom, thread_rng};
+
 pub const MAX_CARD_NUMBER: usize = 108;
 
 pub struct CardReference(usize);
@@ -58,6 +60,22 @@ pub enum DrawAction {
     DrawOne,
     DrawTwo,
     DrawFour,
+}
+
+impl Default for DrawAction {
+    fn default() -> Self {
+        DrawAction::DrawOne
+    }
+}
+
+impl From<&DrawAction> for u8 {
+    fn from(value: &DrawAction) -> Self {
+        match value {
+            DrawAction::DrawOne => 1,
+            DrawAction::DrawTwo => 2,
+            DrawAction::DrawFour => 4
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -138,6 +156,16 @@ pub fn init_deck() -> Vec<CardTypes> {
         }));
     }
     cards
+}
+
+pub fn create_deck() -> Vec<CardReference> {
+    let mut result =  Vec::with_capacity(MAX_CARD_NUMBER);
+    for i in 0..MAX_CARD_NUMBER {
+        result.push(CardReference::new(i).expect("CardReference should always work!"))
+    }
+    result.shuffle(&mut thread_rng());
+
+    result
 }
 
 #[cfg(test)]

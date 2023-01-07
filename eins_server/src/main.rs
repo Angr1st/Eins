@@ -1,3 +1,4 @@
 fn main() {
-    println!("Hello, world!");
+    let game = eins_lib::test();
+    println!("{}", game)
 }
