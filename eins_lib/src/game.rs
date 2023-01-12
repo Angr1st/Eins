@@ -53,10 +53,13 @@ impl GameSession {
     pub fn progress(self: Self) -> Self {
         match self.game_state {
             GameState::Init => self.deal_out_hand_cards(),
-            GameState::Regular { turn_state } =>  match turn_state {
+            GameState::Regular { ref turn_state } =>  match turn_state {
                 TurnState::Skip => todo!(),
                 TurnState::PlayCard => todo!(),
-                TurnState::Draw { draw_action } => self.draw_phase(&draw_action.into_iter().map(|da| <&DrawAction as Into<u8>>::into(&da)).sum())
+                TurnState::Draw { draw_action } => {
+                    let draw_amount = draw_action.into_iter().fold(0 as u8, |acc, x| acc + <&DrawAction as Into<u8>>::into(&x));
+                    self.draw_phase(draw_amount)
+                }
             },
             GameState::Finished => todo!()
         }
@@ -108,8 +111,8 @@ pub enum TurnState {
 }
 
 impl TurnState {
-    fn new_draw(drawActions: Vec<DrawAction>) -> Self {
-        TurnState::Draw { draw_action: drawActions }
+    fn new_draw(draw_actions: Vec<DrawAction>) -> Self {
+        TurnState::Draw { draw_action: draw_actions }
     }
 
     fn new_default_draw() -> Self {
