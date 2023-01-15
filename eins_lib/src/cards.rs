@@ -55,6 +55,37 @@ pub enum CardTypes {
     Wild(WildCard),
 }
 
+impl CardTypes {
+    fn is_possible_next_card(&self, next_card: &CardTypes) -> bool {
+        match (self, next_card) {
+            (CardTypes::Normal(current), CardTypes::Normal(next)) => current.is_possible_next_card(next),
+            (CardTypes::Normal(_), CardTypes::Wild(_)) => true,
+            (CardTypes::Wild(_), CardTypes::Normal(_)) => true,
+            (CardTypes::Wild(_), CardTypes::Wild(_)) => true,
+        }
+    }
+}
+
+pub enum CardAction {
+    Draw(DrawAction),
+    ColorChange(Color),
+    Default,
+    ChangeGameDirection,
+    Skip,
+}
+
+impl CardAction {
+    fn is_possible_next_card(&self, current_card: &CardTypes, next_card: &CardTypes) -> bool {
+        
+    }
+}
+
+impl Default for CardAction {
+    fn default() -> Self {
+        CardAction::Default
+    }
+}
+
 #[derive(Debug)]
 pub enum DrawAction {
     DrawOne,
@@ -82,6 +113,12 @@ impl From<&DrawAction> for u8 {
 pub struct ColorCard {
     pub color: Color,
     pub symbol: ColorSymbol,
+}
+
+impl ColorCard {
+    fn is_possible_next_card(&self, next_card: &ColorCard) -> bool {
+        self.color == next_card.color
+    }
 }
 
 #[derive(Debug, PartialEq)]

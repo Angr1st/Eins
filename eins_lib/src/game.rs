@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use uuid::Uuid;
 
-use crate::cards::{CardReference, create_deck, DrawAction};
+use crate::cards::{CardReference, create_deck, DrawAction, Color};
 
 pub const INITIAL_HAND_CARDS: usize = 7;
 pub struct GameSession {
@@ -50,16 +50,22 @@ impl GameSession {
         self
     }
 
+    fn play_card(mut self: Self) -> Self {
+        todo!()
+    }
+
     pub fn progress(self: Self) -> Self {
         match self.game_state {
             GameState::Init => self.deal_out_hand_cards(),
             GameState::Regular { ref turn_state } =>  match turn_state {
                 TurnState::Skip => todo!(),
-                TurnState::PlayCard => todo!(),
+                TurnState::PlayCard => self.play_card(),
                 TurnState::Draw { draw_action } => {
                     let draw_amount = draw_action.into_iter().fold(0 as u8, |acc, x| acc + <&DrawAction as Into<u8>>::into(&x));
                     self.draw_phase(draw_amount)
                 }
+                TurnState::ColorWish { color } => todo!(),
+                TurnState::ChangeDirection => todo!(),
             },
             GameState::Finished => todo!()
         }
@@ -105,9 +111,11 @@ pub enum HandState {
 
 #[derive(Debug)]
 pub enum TurnState {
-    Draw { draw_action: Vec<DrawAction> },
     PlayCard,
-    Skip
+    Draw { draw_action: Vec<DrawAction> },
+    Skip,
+    ColorWish { color: Color },
+    ChangeDirection
 }
 
 impl TurnState {
@@ -117,6 +125,16 @@ impl TurnState {
 
     fn new_default_draw() -> Self {
         TurnState::Draw { draw_action: vec![DrawAction::default()] }
+    }
+
+    fn add_draw(self, next_draw_action: DrawAction) -> Self {
+        match self {
+            TurnState::Draw { mut draw_action } => {
+                draw_action.push(next_draw_action);
+                TurnState::Draw { draw_action }
+            },
+            _ => panic!()
+        }
     }
 }
 
