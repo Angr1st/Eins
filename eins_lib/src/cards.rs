@@ -66,6 +66,7 @@ impl CardTypes {
     }
 }
 
+#[derive(Debug)]
 pub enum CardAction {
     Draw(DrawAction),
     ColorChange(Color),
@@ -75,8 +76,17 @@ pub enum CardAction {
 }
 
 impl CardAction {
-    fn is_possible_next_card(&self, current_card: &CardTypes, next_card: &CardTypes) -> bool {
-        
+    fn is_possible_next_card(&self, current_card: &CardTypes, next_card: &CardTypes) -> Option<bool> {
+        match self {
+            CardAction::Skip => None,
+            CardAction::Draw(_) => None,
+            CardAction::ColorChange(color) => match next_card {
+                CardTypes::Normal(next_color_card) => Some(*color == next_color_card.color),
+                CardTypes::Wild(_) => Some(true),
+            },
+            CardAction::Default => Some(current_card.is_possible_next_card(next_card)),
+            CardAction::ChangeGameDirection => None,
+        }
     }
 }
 

@@ -2,27 +2,32 @@ use std::fmt::Display;
 
 use uuid::Uuid;
 
-use crate::cards::{CardReference, create_deck, DrawAction, Color};
+use crate::cards::{CardReference, create_deck, DrawAction, Color, CardAction};
 
 pub const INITIAL_HAND_CARDS: usize = 7;
+pub const MAX_NUMBER_OF_PLAYERS: usize = 15;
+
 pub struct GameSession {
     game_state:GameState,
     stack:Vec<CardReference>,
     deck:Vec<CardReference>,
     players:Vec<Hand>,
     game_direction:GameDirection,
-    current_player:u8
+    current_player:u8,
+    player_number:u8
 }
 
 impl GameSession {
     pub fn new(players:Vec<Hand>) -> Self {
+        let player_number : u8 = players.len().try_into().expect("The maximum number of players is 15");
         GameSession {
             game_state:GameState::Init,
             stack : vec![],
             deck: create_deck(),
             players,
             game_direction:GameDirection::Clockwise,
-            current_player:0
+            current_player:0,
+            player_number
         }
     }
 
@@ -45,7 +50,7 @@ impl GameSession {
             let card = self.deck.pop();
             player.held_cards.push(card.expect("there should be a cardreference here!"))
         }
-        self.game_state = GameState::Regular { turn_state: TurnState::PlayCard };
+        self.game_state = GameState::Regular { turn_state: TurnState::default() };
 
         self
     }
@@ -54,18 +59,37 @@ impl GameSession {
         todo!()
     }
 
+    fn next_player(mut self: Self) -> Self {
+        match self.game_direction {
+            GameDirection::Clockwise => if self.current_player + 1 == self.player_number {
+                self.current_player = 0;
+            } else {
+                self.current_player = self.current_player + 1;
+            },
+            GameDirection::CounterClockwise => if self.current_player - 1 == 0 {
+                self.current_player = self.player_number - 1;
+            } else {
+                self.current_player = self.current_player - 1;
+            }
+        };
+
+        self
+    }
+
     pub fn progress(self: Self) -> Self {
         match self.game_state {
             GameState::Init => self.deal_out_hand_cards(),
             GameState::Regular { ref turn_state } =>  match turn_state {
+                TurnState::Init => todo!(),
                 TurnState::Skip => todo!(),
-                TurnState::PlayCard => self.play_card(),
+                TurnState::PlayCard { card_action } => self.play_card(),
                 TurnState::Draw { draw_action } => {
-                    let draw_amount = draw_action.into_iter().fold(0 as u8, |acc, x| acc + <&DrawAction as Into<u8>>::into(&x));
+                    let draw_amount = draw_action.iter().fold(0 as u8, |acc, x| acc + <&DrawAction as Into<u8>>::into(&x));
                     self.draw_phase(draw_amount)
                 }
                 TurnState::ColorWish { color } => todo!(),
                 TurnState::ChangeDirection => todo!(),
+                TurnState::NextPlayer => self.next_player()
             },
             GameState::Finished => todo!()
         }
@@ -111,11 +135,13 @@ pub enum HandState {
 
 #[derive(Debug)]
 pub enum TurnState {
-    PlayCard,
+    Init,
+    PlayCard { card_action: CardAction },
     Draw { draw_action: Vec<DrawAction> },
     Skip,
     ColorWish { color: Color },
-    ChangeDirection
+    ChangeDirection,
+    NextPlayer
 }
 
 impl TurnState {
@@ -140,7 +166,7 @@ impl TurnState {
 
 impl Default for TurnState {
     fn default() -> Self {
-        TurnState::PlayCard
+        TurnState::Init
     }
 }
 
