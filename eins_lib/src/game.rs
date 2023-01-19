@@ -2,12 +2,13 @@ use std::fmt::Display;
 
 use uuid::Uuid;
 
-use crate::cards::{CardReference, create_deck, DrawAction, Color, CardAction};
+use crate::cards::{CardReference, create_deck, DrawAction, Color, CardAction, CardTypes};
 
 pub const INITIAL_HAND_CARDS: usize = 7;
-pub const MAX_NUMBER_OF_PLAYERS: usize = 15;
+pub const MAX_NUMBER_OF_PLAYERS: usize = 10;
 
-pub struct GameSession {
+pub struct GameSession<'cards> {
+    cards:&'cards Vec<CardTypes>,
     game_state:GameState,
     stack:Vec<CardReference>,
     deck:Vec<CardReference>,
@@ -17,10 +18,13 @@ pub struct GameSession {
     player_number:u8
 }
 
-impl GameSession {
-    pub fn new(players:Vec<Hand>) -> Self {
+impl<'cards> GameSession<'cards> {
+    pub fn new(cards: &Vec<CardTypes>, players:Vec<Hand>) -> Self {
         let player_number : u8 = players.len().try_into().expect("The maximum number of players is 15");
+        let deck = create_deck();
+        
         GameSession {
+            cards,
             game_state:GameState::Init,
             stack : vec![],
             deck: create_deck(),
@@ -29,6 +33,22 @@ impl GameSession {
             current_player:0,
             player_number
         }
+    }
+
+    fn find_starting_card(cards:&Vec<CardTypes>, deck: &mut Vec<CardReference>) -> CardReference {
+        let mut first_valid_card_position = 0;
+        
+        for card_ref in deck {
+            let card:&CardTypes = cards.get(card_ref.into()).expect("Card should always exist!");
+            
+            first_valid_card_position = first_valid_card_position + 1;
+            
+            if card.is_possible_initial_card() {
+                break;
+            }
+        }
+
+        deck.remove(first_valid_card_position)
     }
 
     fn deal_out_hand_cards(mut self: Self) -> Self {
@@ -96,7 +116,7 @@ impl GameSession {
     }
 }
 
-impl Display for GameSession {
+impl<'cards> Display for GameSession<'cards> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.game_state)
     }

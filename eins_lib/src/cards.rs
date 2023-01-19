@@ -2,6 +2,7 @@ use rand::{seq::SliceRandom, thread_rng};
 
 pub const MAX_CARD_NUMBER: usize = 108;
 
+#[derive(Debug, Copy, Clone)]
 pub struct CardReference(usize);
 
 impl CardReference {
@@ -15,6 +16,12 @@ impl CardReference {
 
     fn card_number(&self) -> usize {
         self.0
+    }
+}
+
+impl From<&CardReference> for usize {
+    fn from(value: &CardReference) -> Self {
+        value.0
     }
 }
 
@@ -62,6 +69,13 @@ impl CardTypes {
             (CardTypes::Normal(_), CardTypes::Wild(_)) => true,
             (CardTypes::Wild(_), CardTypes::Normal(_)) => true,
             (CardTypes::Wild(_), CardTypes::Wild(_)) => true,
+        }
+    }
+
+    pub fn is_possible_initial_card(&self) -> bool {
+        match self {
+            CardTypes::Normal(_) => true,
+            CardTypes::Wild(_) => false,
         }
     }
 }
