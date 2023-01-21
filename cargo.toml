@@ -1,0 +1,7 @@
+[workspace]
+
+members = [
+    "eins_lib",
+    "eins_server",
+    "eins_client"
+]
