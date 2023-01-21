@@ -2,6 +2,8 @@ use rand::{seq::SliceRandom, thread_rng};
 
 pub const MAX_CARD_NUMBER: usize = 108;
 
+pub static ALL_CARDS: Vec<CardTypes> = init_deck();
+
 #[derive(Debug, Copy, Clone)]
 pub struct CardReference(usize);
 
@@ -65,7 +67,9 @@ pub enum CardTypes {
 impl CardTypes {
     fn is_possible_next_card(&self, next_card: &CardTypes) -> bool {
         match (self, next_card) {
-            (CardTypes::Normal(current), CardTypes::Normal(next)) => current.is_possible_next_card(next),
+            (CardTypes::Normal(current), CardTypes::Normal(next)) => {
+                current.is_possible_next_card(next)
+            }
             (CardTypes::Normal(_), CardTypes::Wild(_)) => true,
             (CardTypes::Wild(_), CardTypes::Normal(_)) => true,
             (CardTypes::Wild(_), CardTypes::Wild(_)) => true,
@@ -90,7 +94,11 @@ pub enum CardAction {
 }
 
 impl CardAction {
-    fn is_possible_next_card(&self, current_card: &CardTypes, next_card: &CardTypes) -> Option<bool> {
+    fn is_possible_next_card(
+        &self,
+        current_card: &CardTypes,
+        next_card: &CardTypes,
+    ) -> Option<bool> {
         match self {
             CardAction::Skip => None,
             CardAction::Draw(_) => None,
@@ -128,7 +136,7 @@ impl From<&DrawAction> for u8 {
         match value {
             DrawAction::DrawOne => 1,
             DrawAction::DrawTwo => 2,
-            DrawAction::DrawFour => 4
+            DrawAction::DrawFour => 4,
         }
     }
 }
@@ -220,7 +228,7 @@ pub fn init_deck() -> Vec<CardTypes> {
 }
 
 pub fn create_deck() -> Vec<CardReference> {
-    let mut result =  Vec::with_capacity(MAX_CARD_NUMBER);
+    let mut result = Vec::with_capacity(MAX_CARD_NUMBER);
     for i in 0..MAX_CARD_NUMBER {
         result.push(CardReference::new(i).expect("CardReference should always work!"))
     }
