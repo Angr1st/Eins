@@ -149,7 +149,7 @@ pub struct ColorCard {
 
 impl ColorCard {
     fn is_possible_next_card(&self, next_card: &ColorCard) -> bool {
-        self.color == next_card.color
+        self.color == next_card.color || self.symbol == next_card.symbol
     }
 }
 
