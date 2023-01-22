@@ -1,10 +1,12 @@
-mod cards;
+pub mod cards;
 mod game;
 
 use cards::CardTypes;
 use game::{GameSession, Hand};
 
-pub fn test(cards: &'static Vec<CardTypes>) -> GameSession<'static> {
+pub fn test() -> GameSession<'static> {
+    let cards = &cards::ALL_CARDS;
+    let length_of_cards = cards.len();
     let hand_one = Hand::new(None);
     let hand_two = Hand::new(None);
     let players = vec![hand_one, hand_two];

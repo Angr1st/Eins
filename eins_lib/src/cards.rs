@@ -2,7 +2,7 @@ use rand::{seq::SliceRandom, thread_rng};
 
 pub const MAX_CARD_NUMBER: usize = 108;
 
-pub static ALL_CARDS: Vec<CardTypes> = init_deck();
+pub static ALL_CARDS: [CardTypes; MAX_CARD_NUMBER] = init_deck();
 
 #[derive(Debug, Copy, Clone)]
 pub struct CardReference(usize);
@@ -35,7 +35,7 @@ pub enum Color {
     Green,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum ColorSymbol {
     Zero,
     One,
@@ -52,13 +52,13 @@ pub enum ColorSymbol {
     Skip,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum WildSymbol {
     ChooseColor,
     DrawFour,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum CardTypes {
     Normal(ColorCard),
     Wild(WildCard),
@@ -141,7 +141,7 @@ impl From<&DrawAction> for u8 {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub struct ColorCard {
     pub color: Color,
     pub symbol: ColorSymbol,
@@ -153,77 +153,555 @@ impl ColorCard {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub struct WildCard {
     pub symbol: WildSymbol,
 }
 
-pub fn init_deck() -> Vec<CardTypes> {
-    let mut cards = Vec::with_capacity(MAX_CARD_NUMBER);
-    for _ in 0..4 {
-        cards.push(CardTypes::Wild(WildCard {
-            symbol: WildSymbol::ChooseColor,
-        }));
-    }
-    for _ in 0..4 {
-        cards.push(CardTypes::Wild(WildCard {
-            symbol: WildSymbol::DrawFour,
-        }));
-    }
-    for color in [Color::Red, Color::Blue, Color::Green, Color::Orange].iter() {
-        cards.push(CardTypes::Normal(ColorCard {
-            color: *color,
-            symbol: ColorSymbol::Zero,
-        }));
-        cards.push(CardTypes::Normal(ColorCard {
-            color: *color,
-            symbol: ColorSymbol::One,
-        }));
-        cards.push(CardTypes::Normal(ColorCard {
-            color: *color,
-            symbol: ColorSymbol::Two,
-        }));
-        cards.push(CardTypes::Normal(ColorCard {
-            color: *color,
-            symbol: ColorSymbol::Three,
-        }));
-        cards.push(CardTypes::Normal(ColorCard {
-            color: *color,
-            symbol: ColorSymbol::Four,
-        }));
-        cards.push(CardTypes::Normal(ColorCard {
-            color: *color,
-            symbol: ColorSymbol::Five,
-        }));
-        cards.push(CardTypes::Normal(ColorCard {
-            color: *color,
-            symbol: ColorSymbol::Six,
-        }));
-        cards.push(CardTypes::Normal(ColorCard {
-            color: *color,
-            symbol: ColorSymbol::Seven,
-        }));
-        cards.push(CardTypes::Normal(ColorCard {
-            color: *color,
-            symbol: ColorSymbol::Eight,
-        }));
-        cards.push(CardTypes::Normal(ColorCard {
-            color: *color,
-            symbol: ColorSymbol::Nine,
-        }));
-        cards.push(CardTypes::Normal(ColorCard {
-            color: *color,
-            symbol: ColorSymbol::DrawTwo,
-        }));
-        cards.push(CardTypes::Normal(ColorCard {
-            color: *color,
-            symbol: ColorSymbol::Skip,
-        }));
-        cards.push(CardTypes::Normal(ColorCard {
-            color: *color,
-            symbol: ColorSymbol::Reverse,
-        }));
-    }
+pub const fn init_deck() -> [CardTypes; MAX_CARD_NUMBER] {
+    let mut cards: [CardTypes; MAX_CARD_NUMBER] = [CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::Zero,
+    }); MAX_CARD_NUMBER];
+    let mut index: usize = 0;
+    //4 Times Choose Color
+    cards[index] = CardTypes::Wild(WildCard {
+        symbol: WildSymbol::ChooseColor,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Wild(WildCard {
+        symbol: WildSymbol::ChooseColor,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Wild(WildCard {
+        symbol: WildSymbol::ChooseColor,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Wild(WildCard {
+        symbol: WildSymbol::ChooseColor,
+    });
+    index = index + 1;
+    //4 Times Draw Four
+    cards[index] = CardTypes::Wild(WildCard {
+        symbol: WildSymbol::DrawFour,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Wild(WildCard {
+        symbol: WildSymbol::DrawFour,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Wild(WildCard {
+        symbol: WildSymbol::DrawFour,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Wild(WildCard {
+        symbol: WildSymbol::DrawFour,
+    });
+    index = index + 1;
+    //Red Normal Cards
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Red,
+        symbol: ColorSymbol::Zero,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Red,
+        symbol: ColorSymbol::One,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Red,
+        symbol: ColorSymbol::Two,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Red,
+        symbol: ColorSymbol::Three,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Red,
+        symbol: ColorSymbol::Four,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Red,
+        symbol: ColorSymbol::Five,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Red,
+        symbol: ColorSymbol::Six,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Red,
+        symbol: ColorSymbol::Seven,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Red,
+        symbol: ColorSymbol::Eight,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Red,
+        symbol: ColorSymbol::Nine,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Red,
+        symbol: ColorSymbol::DrawTwo,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Red,
+        symbol: ColorSymbol::Skip,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Red,
+        symbol: ColorSymbol::Reverse,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Red,
+        symbol: ColorSymbol::One,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Red,
+        symbol: ColorSymbol::Two,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Red,
+        symbol: ColorSymbol::Three,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Red,
+        symbol: ColorSymbol::Four,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Red,
+        symbol: ColorSymbol::Five,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Red,
+        symbol: ColorSymbol::Six,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Red,
+        symbol: ColorSymbol::Seven,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Red,
+        symbol: ColorSymbol::Eight,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Red,
+        symbol: ColorSymbol::Nine,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Red,
+        symbol: ColorSymbol::DrawTwo,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Red,
+        symbol: ColorSymbol::Skip,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Red,
+        symbol: ColorSymbol::Reverse,
+    });
+    index = index + 1;
+    //Blue Normal Cards
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::Zero,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::One,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::Two,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::Three,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::Four,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::Five,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::Six,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::Seven,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::Eight,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::Nine,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::DrawTwo,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::Skip,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::Reverse,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::One,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::Two,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::Three,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::Four,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::Five,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::Six,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::Seven,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::Eight,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::Nine,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::DrawTwo,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::Skip,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Blue,
+        symbol: ColorSymbol::Reverse,
+    });
+    index = index + 1;
+    //Orange Normal Cards
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Orange,
+        symbol: ColorSymbol::Zero,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Orange,
+        symbol: ColorSymbol::One,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Orange,
+        symbol: ColorSymbol::Two,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Orange,
+        symbol: ColorSymbol::Three,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Orange,
+        symbol: ColorSymbol::Four,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Orange,
+        symbol: ColorSymbol::Five,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Orange,
+        symbol: ColorSymbol::Six,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Orange,
+        symbol: ColorSymbol::Seven,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Orange,
+        symbol: ColorSymbol::Eight,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Orange,
+        symbol: ColorSymbol::Nine,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Orange,
+        symbol: ColorSymbol::DrawTwo,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Orange,
+        symbol: ColorSymbol::Skip,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Orange,
+        symbol: ColorSymbol::Reverse,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Orange,
+        symbol: ColorSymbol::One,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Orange,
+        symbol: ColorSymbol::Two,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Orange,
+        symbol: ColorSymbol::Three,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Orange,
+        symbol: ColorSymbol::Four,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Orange,
+        symbol: ColorSymbol::Five,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Orange,
+        symbol: ColorSymbol::Six,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Orange,
+        symbol: ColorSymbol::Seven,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Orange,
+        symbol: ColorSymbol::Eight,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Orange,
+        symbol: ColorSymbol::Nine,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Orange,
+        symbol: ColorSymbol::DrawTwo,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Orange,
+        symbol: ColorSymbol::Skip,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Orange,
+        symbol: ColorSymbol::Reverse,
+    });
+    index = index + 1;
+    //Green Normal Cards
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Green,
+        symbol: ColorSymbol::Zero,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Green,
+        symbol: ColorSymbol::One,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Green,
+        symbol: ColorSymbol::Two,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Green,
+        symbol: ColorSymbol::Three,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Green,
+        symbol: ColorSymbol::Four,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Green,
+        symbol: ColorSymbol::Five,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Green,
+        symbol: ColorSymbol::Six,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Green,
+        symbol: ColorSymbol::Seven,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Green,
+        symbol: ColorSymbol::Eight,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Green,
+        symbol: ColorSymbol::Nine,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Green,
+        symbol: ColorSymbol::DrawTwo,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Green,
+        symbol: ColorSymbol::Skip,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Green,
+        symbol: ColorSymbol::Reverse,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Green,
+        symbol: ColorSymbol::One,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Green,
+        symbol: ColorSymbol::Two,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Green,
+        symbol: ColorSymbol::Three,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Green,
+        symbol: ColorSymbol::Four,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Green,
+        symbol: ColorSymbol::Five,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Green,
+        symbol: ColorSymbol::Six,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Green,
+        symbol: ColorSymbol::Seven,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Green,
+        symbol: ColorSymbol::Eight,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Green,
+        symbol: ColorSymbol::Nine,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Green,
+        symbol: ColorSymbol::DrawTwo,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Green,
+        symbol: ColorSymbol::Skip,
+    });
+    index = index + 1;
+    cards[index] = CardTypes::Normal(ColorCard {
+        color: Color::Green,
+        symbol: ColorSymbol::Reverse,
+    });
+    
     cards
 }
 
@@ -261,7 +739,7 @@ mod tests {
             symbol: WildSymbol::ChooseColor,
         });
         let last_card = CardTypes::Normal(ColorCard {
-            color: Color::Orange,
+            color: Color::Green,
             symbol: ColorSymbol::Reverse,
         });
 
