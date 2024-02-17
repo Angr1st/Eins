@@ -788,4 +788,48 @@ mod tests {
             "Card Reference 109 outside of allowed range of 0 - 108!"
         );
     }
+
+    #[test]
+    fn same_color_possible_next_card() {
+        let color = Color::Green;
+        let first_card = CardTypes::Normal(ColorCard {
+            color,
+            symbol: ColorSymbol::Zero,
+        });
+        let second_card = CardTypes::Normal(ColorCard {
+            color,
+            symbol: ColorSymbol::One,
+        });
+
+        assert!(first_card.is_possible_next_card(&second_card));
+    }
+
+    #[test]
+    fn different_color_different_symbol_impossible_next_card() {
+        let first_card = CardTypes::Normal(ColorCard {
+            color: Color::Red,
+            symbol: ColorSymbol::Zero,
+        });
+        let second_card = CardTypes::Normal(ColorCard {
+            color: Color::Blue,
+            symbol: ColorSymbol::One,
+        });
+
+        assert!(!first_card.is_possible_next_card(&second_card));
+    }
+
+    #[test]
+    fn different_color_same_symbol_possible_next_card() {
+        let symbol = ColorSymbol::Zero;
+        let first_card = CardTypes::Normal(ColorCard {
+            color: Color::Red,
+            symbol,
+        });
+        let second_card = CardTypes::Normal(ColorCard {
+            color: Color::Blue,
+            symbol,
+        });
+
+        assert!(first_card.is_possible_next_card(&second_card));
+    }
 }
