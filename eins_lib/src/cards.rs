@@ -27,6 +27,17 @@ impl From<&CardReference> for usize {
     }
 }
 
+impl TryFrom<usize> for CardReference {
+    type Error = String;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        let card_ref = CardReference::new(value);
+        card_ref.ok_or(format!(
+            "Card Reference {value} outside of allowed range of 0 - {MAX_CARD_NUMBER}!"
+        ))
+    }
+}
+
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Color {
     Red,
@@ -701,7 +712,7 @@ pub const fn init_deck() -> [CardTypes; MAX_CARD_NUMBER] {
         color: Color::Green,
         symbol: ColorSymbol::Reverse,
     });
-    
+
     cards
 }
 
@@ -765,5 +776,16 @@ mod tests {
 
         let invalid_card_ref = CardReference::new(MAX_CARD_NUMBER + 1);
         assert!(invalid_card_ref.is_none());
+    }
+
+    #[test]
+    fn card_reference_try_from_error() {
+        let outside_max_range = MAX_CARD_NUMBER + 1;
+        let card_ref_result: Result<CardReference, _> = outside_max_range.try_into();
+        assert!(card_ref_result.is_err());
+        assert_eq!(
+            card_ref_result.unwrap_err(),
+            "Card Reference 109 outside of allowed range of 0 - 108!"
+        );
     }
 }
