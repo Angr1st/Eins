@@ -2,13 +2,13 @@ use std::fmt::Display;
 
 use uuid::Uuid;
 
-use crate::cards::{create_deck, CardAction, CardReference, CardTypes, Color, DrawAction, self};
+use crate::cards::{self, create_deck, CardAction, CardReference, CardTypes, Color, DrawAction};
 
 pub const INITIAL_HAND_CARDS: usize = 7;
 pub const MAX_NUMBER_OF_PLAYERS: usize = 10;
 
 pub struct GameSession<'cards> {
-    cards: &'cards [CardTypes;cards::MAX_CARD_NUMBER],
+    cards: &'cards [CardTypes; cards::MAX_CARD_NUMBER],
     game_state: GameState,
     stack: Vec<CardReference>,
     deck: Vec<CardReference>,
@@ -19,7 +19,7 @@ pub struct GameSession<'cards> {
 }
 
 impl<'cards> GameSession<'cards> {
-    pub fn new(cards: &'cards [CardTypes;cards::MAX_CARD_NUMBER], players: Vec<Hand>) -> Self {
+    pub fn new(cards: &'cards [CardTypes; cards::MAX_CARD_NUMBER], players: Vec<Hand>) -> Self {
         let player_number: u8 = players
             .len()
             .try_into()
@@ -42,7 +42,10 @@ impl<'cards> GameSession<'cards> {
         }
     }
 
-    fn find_starting_card(cards: &[CardTypes;cards::MAX_CARD_NUMBER], deck: &mut Vec<CardReference>) -> CardReference {
+    fn find_starting_card(
+        cards: &[CardTypes; cards::MAX_CARD_NUMBER],
+        deck: &mut Vec<CardReference>,
+    ) -> CardReference {
         let mut first_valid_card_position = 0;
 
         for card_ref in deck.iter() {
@@ -159,6 +162,12 @@ impl Hand {
             status: HandState::Playing,
             player_id,
         }
+    }
+}
+
+impl Default for Hand {
+    fn default() -> Self {
+        Hand::new(Some(Uuid::new_v4()))
     }
 }
 
