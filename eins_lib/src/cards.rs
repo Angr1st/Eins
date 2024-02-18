@@ -99,7 +99,7 @@ impl CardTypes {
 pub enum CardAction {
     Draw(DrawAction),
     ColorChange(Color),
-    Default,
+    Regular,
     ChangeGameDirection,
     Skip,
 }
@@ -117,7 +117,7 @@ impl CardAction {
                 CardTypes::Normal(next_color_card) => Some(*color == next_color_card.color),
                 CardTypes::Wild(_) => Some(true),
             },
-            CardAction::Default => Some(current_card.is_possible_next_card(next_card)),
+            CardAction::Regular => Some(current_card.is_possible_next_card(next_card)),
             CardAction::ChangeGameDirection => None,
         }
     }
@@ -125,7 +125,7 @@ impl CardAction {
 
 impl Default for CardAction {
     fn default() -> Self {
-        CardAction::Default
+        CardAction::Regular
     }
 }
 
