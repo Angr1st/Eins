@@ -10,6 +10,6 @@ pub fn test() -> GameSession<'static> {
     let hand_one = Hand::default();
     let hand_two = Hand::default();
     let players = vec![hand_one, hand_two];
-    let game_session = GameSession::new(&cards, players);
+    let game_session = GameSession::new(players);
     game_session.progress()
 }

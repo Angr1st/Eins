@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, borrow::BorrowMut};
 
 use uuid::Uuid;
 
@@ -7,9 +7,12 @@ use crate::cards::{self, create_deck, CardAction, CardReference, CardTypes, Colo
 pub const INITIAL_HAND_CARDS: usize = 7;
 pub const MAX_NUMBER_OF_PLAYERS: usize = 10;
 
-pub struct GameSession<'cards> {
-    cards: &'cards [CardTypes; cards::MAX_CARD_NUMBER],
-    game_state: GameState,
+fn possible_next_card(currentCard: CardReference, hand: &Vec<CardReference>, color_constraint_opt: Option<Color>) -> Play {
+    let actual_card = cards::retrieve_card(currentCard);
+    hand.into_iter().filter(|next_card| )
+}
+
+pub struct ActualSession {
     stack: Vec<CardReference>,
     deck: Vec<CardReference>,
     players: Vec<Hand>,
@@ -18,8 +21,31 @@ pub struct GameSession<'cards> {
     player_number: u8,
 }
 
-impl<'cards> GameSession<'cards> {
-    pub fn new(cards: &'cards [CardTypes; cards::MAX_CARD_NUMBER], players: Vec<Hand>) -> Self {
+pub struct GameSession<G: GameSessionState> {
+    game_state: G,
+    session_state: Box<ActualSession>,
+}
+
+enum GameSetup {}
+enum Play {
+    PossibleCards { options: Vec<CardReference> },
+    DrawCards { draw_amount: DrawAction },
+}
+struct ColorWish {
+    color: Color,
+}
+struct FinishGame {
+    winner: Uuid,
+}
+
+trait GameSessionState {}
+impl GameSessionState for GameSetup {}
+impl GameSessionState for Play {}
+impl GameSessionState for ColorWish {}
+impl GameSessionState for FinishGame {}
+
+impl GameSession<GameSetup> {
+    pub fn new(players: Vec<Hand>) -> Self {
         let player_number: u8 = players
             .len()
             .try_into()
@@ -30,22 +56,23 @@ impl<'cards> GameSession<'cards> {
 
         let starting_card = GameSession::find_starting_card(cards, &mut deck);
 
-        GameSession {
-            cards,
-            game_state: GameState::Init,
+        let session = ActualSession {
             stack: vec![starting_card],
             deck,
             players,
             game_direction: GameDirection::Clockwise,
             current_player: 0,
             player_number,
-        }
+        };
+
+        let mut init = Self {
+            session_state: Box::new(session),
+            game_state: GameSetup {},
+        };
+        init.deal_out_hand_cards()
     }
 
-    fn find_starting_card(
-        cards: &[CardTypes; cards::MAX_CARD_NUMBER],
-        deck: &mut Vec<CardReference>,
-    ) -> CardReference {
+    fn find_starting_card(deck: &mut Vec<CardReference>) -> CardReference {
         let mut first_valid_card_position = 0;
 
         for card_ref in deck.iter() {
@@ -78,6 +105,7 @@ impl<'cards> GameSession<'cards> {
         };
         self
     }
+}
 
     fn draw_phase(mut self: Self, draw_amount: u8) -> Self {
         let player = &mut self.players[self.current_player as usize];
@@ -141,7 +169,7 @@ impl<'cards> GameSession<'cards> {
     }
 }
 
-impl<'cards> Display for GameSession<'cards> {
+impl<G> Display for GameSession<G> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.game_state)
     }

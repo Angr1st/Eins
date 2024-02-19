@@ -76,14 +76,19 @@ pub enum CardTypes {
 }
 
 impl CardTypes {
-    fn is_possible_next_card(&self, next_card: &CardTypes) -> bool {
-        match (self, next_card) {
-            (CardTypes::Normal(current), CardTypes::Normal(next)) => {
+    pub fn is_possible_next_card(
+        &self,
+        next_card: &CardTypes,
+        color_wish_opt: Option<Color>,
+    ) -> bool {
+        match (self, next_card, color_wish_opt) {
+            (CardTypes::Normal(current), CardTypes::Normal(next), None) => {
                 current.is_possible_next_card(next)
             }
-            (CardTypes::Normal(_), CardTypes::Wild(_)) => true,
-            (CardTypes::Wild(_), CardTypes::Normal(_)) => true,
-            (CardTypes::Wild(_), CardTypes::Wild(_)) => true,
+            (CardTypes::Normal(_), CardTypes::Wild(_), _) => true,
+            (CardTypes::Wild(_), CardTypes::Normal(_), None) => true,
+            (CardTypes::Wild(_), CardTypes::Normal(next), Some(color)) => next.color == color,
+            (CardTypes::Wild(_), CardTypes::Wild(_), _) => true,
         }
     }
 
@@ -102,6 +107,7 @@ pub enum CardAction {
     Regular,
     ChangeGameDirection,
     Skip,
+    DrawAndColorChange(DrawAction, Color),
 }
 
 impl CardAction {
@@ -117,6 +123,7 @@ impl CardAction {
                 CardTypes::Normal(next_color_card) => Some(*color == next_color_card.color),
                 CardTypes::Wild(_) => Some(true),
             },
+            CardAction::DrawAndColorChange(_, _) => None,
             CardAction::Regular => Some(current_card.is_possible_next_card(next_card)),
             CardAction::ChangeGameDirection => None,
         }
@@ -159,8 +166,11 @@ pub struct ColorCard {
 }
 
 impl ColorCard {
-    fn is_possible_next_card(&self, next_card: &ColorCard) -> bool {
-        self.color == next_card.color || self.symbol == next_card.symbol
+    fn is_possible_next_card(&self, next_card: &ColorCard, color_wish_opt: Option<Color>) -> bool {
+        match color_wish_opt {
+            None => self.color == next_card.color || self.symbol == next_card.symbol,
+            Some(color) => next_card.color == color,
+        }
     }
 }
 
@@ -724,6 +734,10 @@ pub fn create_deck() -> Vec<CardReference> {
     result.shuffle(&mut thread_rng());
 
     result
+}
+
+pub fn retrieve_card(&card_ref: CardReference) -> CardTypes {
+    ALL_CARDS.get_unchecked(card_ref.into()).clone()
 }
 
 #[cfg(test)]
