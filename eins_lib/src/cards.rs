@@ -817,7 +817,7 @@ mod tests {
             symbol: ColorSymbol::One,
         });
 
-        assert!(first_card.is_possible_next_card(&second_card));
+        assert!(first_card.is_possible_next_card(&second_card, None));
     }
 
     #[test]
@@ -831,7 +831,7 @@ mod tests {
             symbol: ColorSymbol::One,
         });
 
-        assert!(!first_card.is_possible_next_card(&second_card));
+        assert!(!first_card.is_possible_next_card(&second_card, None));
     }
 
     #[test]
@@ -846,6 +846,6 @@ mod tests {
             symbol,
         });
 
-        assert!(first_card.is_possible_next_card(&second_card));
+        assert!(first_card.is_possible_next_card(&second_card, None));
     }
 }
