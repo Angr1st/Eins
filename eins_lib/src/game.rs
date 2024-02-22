@@ -1,15 +1,37 @@
-use std::{fmt::Display, borrow::BorrowMut};
+use std::{borrow::BorrowMut, fmt::Display};
 
 use uuid::Uuid;
 
-use crate::cards::{self, create_deck, CardAction, CardReference, CardTypes, Color, DrawAction};
+use crate::cards::{
+    self, create_deck, CardAction, CardReference, CardTypes, Color, DrawAction, ALL_CARDS,
+};
 
 pub const INITIAL_HAND_CARDS: usize = 7;
 pub const MAX_NUMBER_OF_PLAYERS: usize = 10;
 
-fn possible_next_card(currentCard: CardReference, hand: &Vec<CardReference>, color_constraint_opt: Option<Color>) -> Play {
-    let actual_card = cards::retrieve_card(currentCard);
-    hand.into_iter().filter(|next_card| )
+fn possible_next_card(
+    currentCard: CardReference,
+    hand: &Vec<CardReference>,
+    color_constraint_opt: Option<Color>,
+) -> Play {
+    let actual_card = cards::retrieve_card(&currentCard);
+    let possible_cards: Vec<CardReference> = hand
+        .into_iter()
+        .filter(|next_card| {
+            let next_card_ref = cards::retrieve_card(next_card);
+            actual_card.is_possible_next_card(&next_card_ref, color_constraint_opt)
+        })
+        .cloned()
+        .collect();
+    if possible_cards.len() == 0 {
+        Play::DrawCards {
+            draw_amount: DrawAction::DrawOne,
+        }
+    } else {
+        Play::PossibleCards {
+            options: possible_cards,
+        }
+    }
 }
 
 pub struct ActualSession {
@@ -26,15 +48,15 @@ pub struct GameSession<G: GameSessionState> {
     session_state: Box<ActualSession>,
 }
 
-enum GameSetup {}
-enum Play {
+pub struct GameSetup {}
+pub enum Play {
     PossibleCards { options: Vec<CardReference> },
     DrawCards { draw_amount: DrawAction },
 }
-struct ColorWish {
+pub struct ColorWish {
     color: Color,
 }
-struct FinishGame {
+pub struct FinishGame {
     winner: Uuid,
 }
 
@@ -52,9 +74,7 @@ impl GameSession<GameSetup> {
             .expect("The maximum number of players is 10");
         let mut deck = create_deck();
 
-        debug_assert!(cards.len() > 0);
-
-        let starting_card = GameSession::find_starting_card(cards, &mut deck);
+        let starting_card = GameSession::find_starting_card(&mut deck);
 
         let session = ActualSession {
             stack: vec![starting_card],
@@ -77,7 +97,7 @@ impl GameSession<GameSetup> {
 
         for card_ref in deck.iter() {
             let index: usize = card_ref.into();
-            let card: &CardTypes = cards.get(index).expect("Card should always exist!");
+            let card: &CardTypes = &ALL_CARDS.get(index).expect("Card should always exist!");
 
             first_valid_card_position = first_valid_card_position + 1;
 
@@ -90,11 +110,11 @@ impl GameSession<GameSetup> {
     }
 
     fn deal_out_hand_cards(mut self: Self) -> Self {
-        let player_count = self.players.len();
+        let player_count = self.session_state.players.len();
         for _ in 0..INITIAL_HAND_CARDS {
             for player_nr in 0..player_count {
-                let card = self.deck.pop();
-                let player = &mut self.players[player_nr];
+                let card = self.session_state.deck.pop();
+                let player = &mut self.session_state.players[player_nr];
                 player
                     .held_cards
                     .push(card.expect("there should be a cardreference here!"))
@@ -107,10 +127,11 @@ impl GameSession<GameSetup> {
     }
 }
 
+impl GameSession<Play> {
     fn draw_phase(mut self: Self, draw_amount: u8) -> Self {
-        let player = &mut self.players[self.current_player as usize];
+        let player = &mut self.session_state.players[self.session_state.current_player as usize];
         for _ in 0..draw_amount {
-            let card = self.deck.pop();
+            let card = self.session_state.deck.pop();
             player
                 .held_cards
                 .push(card.expect("there should be a cardreference here!"))
@@ -127,19 +148,19 @@ impl GameSession<GameSetup> {
     }
 
     fn next_player(mut self: Self) -> Self {
-        match self.game_direction {
+        match self.session_state.game_direction {
             GameDirection::Clockwise => {
-                if self.current_player + 1 == self.player_number {
-                    self.current_player = 0;
+                if self.session_state.current_player + 1 == self.session_state.player_number {
+                    self.session_state.current_player = 0;
                 } else {
-                    self.current_player = self.current_player + 1;
+                    self.session_state.current_player = self.session_state.current_player + 1;
                 }
             }
             GameDirection::CounterClockwise => {
-                if self.current_player - 1 == 0 {
-                    self.current_player = self.player_number - 1;
+                if self.session_state.current_player - 1 == 0 {
+                    self.session_state.current_player = self.session_state.player_number - 1;
                 } else {
-                    self.current_player = self.current_player - 1;
+                    self.session_state.current_player = self.session_state.current_player - 1;
                 }
             }
         };
@@ -169,7 +190,7 @@ impl GameSession<GameSetup> {
     }
 }
 
-impl<G> Display for GameSession<G> {
+impl<G: GameSessionState> Display for GameSession<G> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.game_state)
     }

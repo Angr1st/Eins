@@ -83,7 +83,7 @@ impl CardTypes {
     ) -> bool {
         match (self, next_card, color_wish_opt) {
             (CardTypes::Normal(current), CardTypes::Normal(next), None) => {
-                current.is_possible_next_card(next)
+                current.is_possible_next_card(next, None)
             }
             (CardTypes::Normal(_), CardTypes::Wild(_), _) => true,
             (CardTypes::Wild(_), CardTypes::Normal(_), None) => true,
@@ -124,7 +124,7 @@ impl CardAction {
                 CardTypes::Wild(_) => Some(true),
             },
             CardAction::DrawAndColorChange(_, _) => None,
-            CardAction::Regular => Some(current_card.is_possible_next_card(next_card)),
+            CardAction::Regular => Some(current_card.is_possible_next_card(next_card, None)),
             CardAction::ChangeGameDirection => None,
         }
     }
@@ -736,8 +736,10 @@ pub fn create_deck() -> Vec<CardReference> {
     result
 }
 
-pub fn retrieve_card(&card_ref: CardReference) -> CardTypes {
-    ALL_CARDS.get_unchecked(card_ref.into()).clone()
+pub fn retrieve_card(card_ref: &CardReference) -> CardTypes {
+    let input_card_index: usize = card_ref.into();
+    let card: &_ = ALL_CARDS.get_unchecked(input_card_index);
+    card.clone()
 }
 
 #[cfg(test)]
