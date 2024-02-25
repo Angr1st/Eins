@@ -134,30 +134,30 @@ impl GameSession<GameSetup> {
     }
 
     pub fn start_game(mut self: Self) -> GameSession<Play> {
-        possible_next_card(, , )
+        let current_card = self
+            .session_state
+            .stack
+            .pop()
+            .expect("The stack should at least contain a card!");
+        let current_hand = self
+            .session_state
+            .players
+            .get(self.session_state.current_player as usize)
+            .expect(&format!(
+                "The current player's {} hand is missing.",
+                self.session_state.current_player
+            ));
+        let next_play = possible_next_card(current_card, &current_hand.held_cards, None);
+        GameSession::<Play> {
+            session_state: self.session_state,
+            game_state: next_play,
+        }
     }
 }
 
-impl GameSession<Play> {
-    fn draw_phase(mut self: Self, draw_amount: u8) -> Self {
-        let player = &mut self.session_state.players[self.session_state.current_player as usize];
-        for _ in 0..draw_amount {
-            let card = self.session_state.deck.pop();
-            player
-                .held_cards
-                .push(card.expect("there should be a cardreference here!"))
-        }
-        self.game_state = GameState::Regular {
-            turn_state: TurnState::default(),
-        };
+impl GameSession<Play> {}
 
-        self
-    }
-
-    fn play_card(mut self: Self) -> Self {
-        todo!()
-    }
-
+impl<G: GameSessionState> GameSession<G> {
     fn next_player(mut self: Self) -> Self {
         match self.session_state.game_direction {
             GameDirection::Clockwise => {
@@ -177,27 +177,6 @@ impl GameSession<Play> {
         };
 
         self
-    }
-
-    pub fn progress(self: Self) -> Self {
-        match self.game_state {
-            GameState::Init => self.deal_out_hand_cards(),
-            GameState::Regular { ref turn_state } => match turn_state {
-                TurnState::Init => todo!(),
-                TurnState::Skip => todo!(),
-                TurnState::PlayCard { card_action } => self.play_card(),
-                TurnState::Draw { draw_action } => {
-                    let draw_amount = draw_action
-                        .iter()
-                        .fold(0 as u8, |acc, x| acc + <&DrawAction as Into<u8>>::into(&x));
-                    self.draw_phase(draw_amount)
-                }
-                TurnState::ColorWish { color } => todo!(),
-                TurnState::ChangeDirection => todo!(),
-                TurnState::NextPlayer => self.next_player(),
-            },
-            GameState::Finished => todo!(),
-        }
     }
 }
 

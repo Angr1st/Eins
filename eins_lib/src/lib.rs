@@ -11,5 +11,6 @@ pub fn test() -> GameSession<Play> {
     let hand_two = Hand::default();
     let players = vec![hand_one, hand_two];
     let game_session = GameSession::<GameSetup>::new(players);
-    game_session.progress()
+    let first_move = game_session.start_game();
+    first_move
 }

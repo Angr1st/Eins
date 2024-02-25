@@ -85,6 +85,7 @@ impl CardTypes {
             (CardTypes::Normal(current), CardTypes::Normal(next), None) => {
                 current.is_possible_next_card(next, None)
             }
+            (CardTypes::Normal(_), CardTypes::Normal(next), Some(color)) => next.color == color,
             (CardTypes::Normal(_), CardTypes::Wild(_), _) => true,
             (CardTypes::Wild(_), CardTypes::Normal(_), None) => true,
             (CardTypes::Wild(_), CardTypes::Normal(next), Some(color)) => next.color == color,
@@ -738,7 +739,7 @@ pub fn create_deck() -> Vec<CardReference> {
 
 pub fn retrieve_card(card_ref: &CardReference) -> CardTypes {
     let input_card_index: usize = card_ref.into();
-    let card: &_ = ALL_CARDS.get_unchecked(input_card_index);
+    let card: &_ = unsafe { ALL_CARDS.get_unchecked(input_card_index) };
     card.clone()
 }
 
