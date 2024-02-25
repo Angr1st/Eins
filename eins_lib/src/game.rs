@@ -10,11 +10,11 @@ pub const INITIAL_HAND_CARDS: usize = 7;
 pub const MAX_NUMBER_OF_PLAYERS: usize = 10;
 
 fn possible_next_card(
-    currentCard: CardReference,
+    current_card: CardReference,
     hand: &Vec<CardReference>,
     color_constraint_opt: Option<Color>,
 ) -> Play {
-    let actual_card = cards::retrieve_card(&currentCard);
+    let actual_card = cards::retrieve_card(&current_card);
     let possible_cards: Vec<CardReference> = hand
         .into_iter()
         .filter(|next_card| {
@@ -40,8 +40,15 @@ pub struct ActualSession {
     deck: Vec<CardReference>,
     players: Vec<Hand>,
     game_direction: GameDirection,
-    current_player: u8,
-    player_number: u8,
+    current_player: usize,
+    player_number: usize,
+    game_id: Uuid,
+}
+
+impl ActualSession {
+    pub fn get_game_id(self: &Self) -> &Uuid {
+        &self.game_id
+    }
 }
 
 #[derive(Debug)]
@@ -69,6 +76,12 @@ pub struct FinishGame {
     winner: Uuid,
 }
 
+#[derive(Debug)]
+pub enum GameError {
+    NotEnoughPlayers,
+    ToManyPlayers,
+}
+
 trait GameSessionState {}
 impl GameSessionState for GameSetup {}
 impl GameSessionState for Play {}
@@ -76,11 +89,14 @@ impl GameSessionState for ColorWish {}
 impl GameSessionState for FinishGame {}
 
 impl GameSession<GameSetup> {
-    pub fn new(players: Vec<Hand>) -> Self {
-        let player_number: u8 = players
-            .len()
-            .try_into()
-            .expect("The maximum number of players is 10");
+    pub fn new(players: Vec<Hand>) -> Result<Self, GameError> {
+        let player_number: usize = players.len();
+        if player_number < 2 {
+            return Err(GameError::NotEnoughPlayers);
+        } else if player_number > MAX_NUMBER_OF_PLAYERS {
+            return Err(GameError::ToManyPlayers);
+        }
+
         let mut deck = create_deck();
 
         let starting_card = GameSession::find_starting_card(&mut deck);
@@ -92,13 +108,14 @@ impl GameSession<GameSetup> {
             game_direction: GameDirection::Clockwise,
             current_player: 0,
             player_number,
+            game_id: uuid::Uuid::new_v4(),
         };
 
         let mut init = Self {
             session_state: Box::new(session),
             game_state: GameSetup {},
         };
-        init.deal_out_hand_cards()
+        Ok(init.deal_out_hand_cards())
     }
 
     fn find_starting_card(deck: &mut Vec<CardReference>) -> CardReference {
