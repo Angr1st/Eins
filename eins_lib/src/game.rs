@@ -34,6 +34,7 @@ fn possible_next_card(
     }
 }
 
+#[derive(Debug)]
 pub struct ActualSession {
     stack: Vec<CardReference>,
     deck: Vec<CardReference>,
@@ -43,19 +44,27 @@ pub struct ActualSession {
     player_number: u8,
 }
 
+#[derive(Debug)]
 pub struct GameSession<G: GameSessionState> {
     game_state: G,
     session_state: Box<ActualSession>,
 }
 
+#[derive(Debug)]
 pub struct GameSetup {}
+
+#[derive(Debug)]
 pub enum Play {
     PossibleCards { options: Vec<CardReference> },
     DrawCards { draw_amount: DrawAction },
 }
+
+#[derive(Debug)]
 pub struct ColorWish {
     color: Color,
 }
+
+#[derive(Debug)]
 pub struct FinishGame {
     winner: Uuid,
 }
@@ -120,10 +129,12 @@ impl GameSession<GameSetup> {
                     .push(card.expect("there should be a cardreference here!"))
             }
         }
-        self.game_state = GameState::Regular {
-            turn_state: TurnState::default(),
-        };
+
         self
+    }
+
+    pub fn start_game(mut self: Self) -> GameSession<Play> {
+        possible_next_card(, , )
     }
 }
 
@@ -190,12 +201,13 @@ impl GameSession<Play> {
     }
 }
 
-impl<G: GameSessionState> Display for GameSession<G> {
+impl<G: GameSessionState + std::fmt::Debug> Display for GameSession<G> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.game_state)
     }
 }
 
+#[derive(Debug)]
 pub struct Hand {
     player_id: Uuid,
     held_cards: Vec<CardReference>,
@@ -227,6 +239,7 @@ pub enum GameState {
     Finished,
 }
 
+#[derive(Debug)]
 pub enum HandState {
     Playing,
     Won,
@@ -274,6 +287,7 @@ impl Default for TurnState {
     }
 }
 
+#[derive(Debug)]
 pub enum GameDirection {
     Clockwise,
     CounterClockwise,
