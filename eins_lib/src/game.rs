@@ -195,6 +195,10 @@ impl<G: GameSessionState> GameSession<G> {
 
         self
     }
+
+    pub fn get_game_session(self: &Self) -> &G {
+        &self.game_state
+    }
 }
 
 impl<G: GameSessionState + std::fmt::Debug> Display for GameSession<G> {
