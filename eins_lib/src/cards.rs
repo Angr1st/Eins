@@ -1,10 +1,11 @@
 use rand::{seq::SliceRandom, thread_rng};
+use serde::{Deserialize, Serialize};
 
 pub const MAX_CARD_NUMBER: usize = 108;
 
 pub static ALL_CARDS: [CardTypes; MAX_CARD_NUMBER] = init_deck();
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct CardReference(usize);
 
 impl CardReference {
@@ -16,7 +17,7 @@ impl CardReference {
         }
     }
 
-    fn card_number(&self) -> usize {
+    pub fn card_number(&self) -> usize {
         self.0
     }
 }

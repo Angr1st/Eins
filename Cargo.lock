@@ -136,9 +136,8 @@ version = "0.1.0"
 name = "eins_lib"
 version = "0.1.0"
 dependencies = [
- "axum",
  "rand",
- "tokio",
+ "serde",
  "uuid",
 ]
 
@@ -146,7 +145,9 @@ dependencies = [
 name = "eins_server"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "eins_lib",
+ "tokio",
 ]
 
 [[package]]
