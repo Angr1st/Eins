@@ -49,6 +49,10 @@ impl ActualSession {
     pub fn get_game_id(self: &Self) -> &Uuid {
         &self.game_id
     }
+
+    pub fn get_players(self: &Self) -> &Vec<Hand> {
+        &self.players
+    }
 }
 
 #[derive(Debug)]
@@ -111,7 +115,7 @@ impl GameSession<GameSetup> {
             game_id: uuid::Uuid::new_v4(),
         };
 
-        let mut init = Self {
+        let init = Self {
             session_state: Box::new(session),
             game_state: GameSetup {},
         };
@@ -196,8 +200,8 @@ impl<G: GameSessionState> GameSession<G> {
         self
     }
 
-    pub fn get_game_session(self: &Self) -> &G {
-        &self.game_state
+    pub fn get_players(self: &Self) -> &Vec<Hand> {
+        &self.session_state.players
     }
 }
 

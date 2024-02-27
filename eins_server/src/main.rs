@@ -13,5 +13,9 @@ async fn main() {
 
 async fn index() -> impl IntoResponse {
     let game = eins_lib::test().expect("Test should succeed!");
+    let first_player = game
+        .get_players()
+        .first()
+        .expect("There is always a first player");
     format!("{}", game)
 }
