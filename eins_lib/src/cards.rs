@@ -1,10 +1,11 @@
 use rand::{seq::SliceRandom, thread_rng};
+use serde::{Deserialize, Serialize};
 
 pub const MAX_CARD_NUMBER: usize = 108;
 
 pub static ALL_CARDS: [CardTypes; MAX_CARD_NUMBER] = init_deck();
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct CardReference(usize);
 
 impl CardReference {
@@ -16,7 +17,7 @@ impl CardReference {
         }
     }
 
-    fn card_number(&self) -> usize {
+    pub fn card_number(&self) -> usize {
         self.0
     }
 }
@@ -24,6 +25,17 @@ impl CardReference {
 impl From<&CardReference> for usize {
     fn from(value: &CardReference) -> Self {
         value.0
+    }
+}
+
+impl TryFrom<usize> for CardReference {
+    type Error = String;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        let card_ref = CardReference::new(value);
+        card_ref.ok_or(format!(
+            "Card Reference {value} outside of allowed range of 0 - {MAX_CARD_NUMBER}!"
+        ))
     }
 }
 
@@ -65,14 +77,20 @@ pub enum CardTypes {
 }
 
 impl CardTypes {
-    fn is_possible_next_card(&self, next_card: &CardTypes) -> bool {
-        match (self, next_card) {
-            (CardTypes::Normal(current), CardTypes::Normal(next)) => {
-                current.is_possible_next_card(next)
+    pub fn is_possible_next_card(
+        &self,
+        next_card: &CardTypes,
+        color_wish_opt: Option<Color>,
+    ) -> bool {
+        match (self, next_card, color_wish_opt) {
+            (CardTypes::Normal(current), CardTypes::Normal(next), None) => {
+                current.is_possible_next_card(next, None)
             }
-            (CardTypes::Normal(_), CardTypes::Wild(_)) => true,
-            (CardTypes::Wild(_), CardTypes::Normal(_)) => true,
-            (CardTypes::Wild(_), CardTypes::Wild(_)) => true,
+            (CardTypes::Normal(_), CardTypes::Normal(next), Some(color)) => next.color == color,
+            (CardTypes::Normal(_), CardTypes::Wild(_), _) => true,
+            (CardTypes::Wild(_), CardTypes::Normal(_), None) => true,
+            (CardTypes::Wild(_), CardTypes::Normal(next), Some(color)) => next.color == color,
+            (CardTypes::Wild(_), CardTypes::Wild(_), _) => true,
         }
     }
 
@@ -88,9 +106,10 @@ impl CardTypes {
 pub enum CardAction {
     Draw(DrawAction),
     ColorChange(Color),
-    Default,
+    Regular,
     ChangeGameDirection,
     Skip,
+    DrawAndColorChange(DrawAction, Color),
 }
 
 impl CardAction {
@@ -106,7 +125,8 @@ impl CardAction {
                 CardTypes::Normal(next_color_card) => Some(*color == next_color_card.color),
                 CardTypes::Wild(_) => Some(true),
             },
-            CardAction::Default => Some(current_card.is_possible_next_card(next_card)),
+            CardAction::DrawAndColorChange(_, _) => None,
+            CardAction::Regular => Some(current_card.is_possible_next_card(next_card, None)),
             CardAction::ChangeGameDirection => None,
         }
     }
@@ -114,7 +134,7 @@ impl CardAction {
 
 impl Default for CardAction {
     fn default() -> Self {
-        CardAction::Default
+        CardAction::Regular
     }
 }
 
@@ -148,8 +168,11 @@ pub struct ColorCard {
 }
 
 impl ColorCard {
-    fn is_possible_next_card(&self, next_card: &ColorCard) -> bool {
-        self.color == next_card.color || self.symbol == next_card.symbol
+    fn is_possible_next_card(&self, next_card: &ColorCard, color_wish_opt: Option<Color>) -> bool {
+        match color_wish_opt {
+            None => self.color == next_card.color || self.symbol == next_card.symbol,
+            Some(color) => next_card.color == color,
+        }
     }
 }
 
@@ -701,7 +724,7 @@ pub const fn init_deck() -> [CardTypes; MAX_CARD_NUMBER] {
         color: Color::Green,
         symbol: ColorSymbol::Reverse,
     });
-    
+
     cards
 }
 
@@ -713,6 +736,12 @@ pub fn create_deck() -> Vec<CardReference> {
     result.shuffle(&mut thread_rng());
 
     result
+}
+
+pub fn retrieve_card(card_ref: &CardReference) -> CardTypes {
+    let input_card_index: usize = card_ref.into();
+    let card: &_ = unsafe { ALL_CARDS.get_unchecked(input_card_index) };
+    card.clone()
 }
 
 #[cfg(test)]
@@ -765,5 +794,60 @@ mod tests {
 
         let invalid_card_ref = CardReference::new(MAX_CARD_NUMBER + 1);
         assert!(invalid_card_ref.is_none());
+    }
+
+    #[test]
+    fn card_reference_try_from_error() {
+        let outside_max_range = MAX_CARD_NUMBER + 1;
+        let card_ref_result: Result<CardReference, _> = outside_max_range.try_into();
+        assert!(card_ref_result.is_err());
+        assert_eq!(
+            card_ref_result.unwrap_err(),
+            "Card Reference 109 outside of allowed range of 0 - 108!"
+        );
+    }
+
+    #[test]
+    fn same_color_possible_next_card() {
+        let color = Color::Green;
+        let first_card = CardTypes::Normal(ColorCard {
+            color,
+            symbol: ColorSymbol::Zero,
+        });
+        let second_card = CardTypes::Normal(ColorCard {
+            color,
+            symbol: ColorSymbol::One,
+        });
+
+        assert!(first_card.is_possible_next_card(&second_card, None));
+    }
+
+    #[test]
+    fn different_color_different_symbol_impossible_next_card() {
+        let first_card = CardTypes::Normal(ColorCard {
+            color: Color::Red,
+            symbol: ColorSymbol::Zero,
+        });
+        let second_card = CardTypes::Normal(ColorCard {
+            color: Color::Blue,
+            symbol: ColorSymbol::One,
+        });
+
+        assert!(!first_card.is_possible_next_card(&second_card, None));
+    }
+
+    #[test]
+    fn different_color_same_symbol_possible_next_card() {
+        let symbol = ColorSymbol::Zero;
+        let first_card = CardTypes::Normal(ColorCard {
+            color: Color::Red,
+            symbol,
+        });
+        let second_card = CardTypes::Normal(ColorCard {
+            color: Color::Blue,
+            symbol,
+        });
+
+        assert!(first_card.is_possible_next_card(&second_card, None));
     }
 }
