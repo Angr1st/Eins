@@ -5,6 +5,11 @@ pub const MAX_CARD_NUMBER: usize = 108;
 
 pub static ALL_CARDS: [CardTypes; MAX_CARD_NUMBER] = init_deck();
 
+pub fn get_card(card_ref: &CardReference) -> CardTypes {
+    let index = card_ref.card_number();
+    ALL_CARDS[index]
+}
+
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct CardReference(usize);
 

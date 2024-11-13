@@ -1,9 +1,9 @@
-use std::{borrow::BorrowMut, fmt::Display};
+use std::fmt::Display;
 
 use uuid::Uuid;
 
 use crate::cards::{
-    self, create_deck, CardAction, CardReference, CardTypes, Color, DrawAction, ALL_CARDS,
+    self, create_deck, get_card, CardAction, CardReference, CardTypes, Color, DrawAction, ALL_CARDS,
 };
 
 pub const INITIAL_HAND_CARDS: usize = 7;
@@ -126,14 +126,12 @@ impl GameSession<GameSetup> {
         let mut first_valid_card_position = 0;
 
         for card_ref in deck.iter() {
-            let index: usize = card_ref.into();
-            let card: &CardTypes = &ALL_CARDS.get(index).expect("Card should always exist!");
-
-            first_valid_card_position = first_valid_card_position + 1;
+            let card = get_card(card_ref);
 
             if card.is_possible_initial_card() {
                 break;
             }
+            first_valid_card_position = first_valid_card_position + 1;
         }
 
         deck.remove(first_valid_card_position)
@@ -154,11 +152,11 @@ impl GameSession<GameSetup> {
         self
     }
 
-    pub fn start_game(mut self: Self) -> GameSession<Play> {
+    pub fn start_game(self: Self) -> GameSession<Play> {
         let current_card = self
             .session_state
             .stack
-            .pop()
+            .last()
             .expect("The stack should at least contain a card!");
         let current_hand = self
             .session_state
@@ -168,7 +166,7 @@ impl GameSession<GameSetup> {
                 "The current player's {} hand is missing.",
                 self.session_state.current_player
             ));
-        let next_play = possible_next_card(current_card, &current_hand.held_cards, None);
+        let next_play = possible_next_card(*current_card, &current_hand.held_cards, None);
         GameSession::<Play> {
             session_state: self.session_state,
             game_state: next_play,
@@ -176,7 +174,11 @@ impl GameSession<GameSetup> {
     }
 }
 
-impl GameSession<Play> {}
+impl GameSession<Play> {
+    pub fn get_available_choices(&self) -> &Play {
+        &self.game_state
+    }
+}
 
 impl<G: GameSessionState> GameSession<G> {
     fn next_player(mut self: Self) -> Self {
@@ -203,11 +205,21 @@ impl<G: GameSessionState> GameSession<G> {
     pub fn get_players(self: &Self) -> &Vec<Hand> {
         &self.session_state.players
     }
+
+    pub fn get_current_card(&self) -> CardTypes {
+        let current_card = self
+            .session_state
+            .stack
+            .last()
+            .expect("There should always be at least one card on the stack.");
+        get_card(current_card)
+    }
 }
 
 impl<G: GameSessionState + std::fmt::Debug> Display for GameSession<G> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.game_state)
+        writeln!(f, "GameState: {:?}", self.game_state)?;
+        write!(f, "SessionState: {:?}", self.session_state)
     }
 }
 
@@ -227,6 +239,10 @@ impl Hand {
             status: HandState::Playing,
             player_id,
         }
+    }
+
+    pub fn get_held_cards(&self) -> &Vec<CardReference> {
+        &self.held_cards
     }
 }
 

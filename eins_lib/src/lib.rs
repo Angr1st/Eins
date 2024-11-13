@@ -1,5 +1,5 @@
 pub mod cards;
-mod game;
+pub mod game;
 
 use game::{GameError, GameSession, GameSetup, Hand, Play};
 
