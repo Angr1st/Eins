@@ -147,7 +147,9 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "eins_lib",
+ "serde",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -708,6 +710,7 @@ checksum = "f8c5f0a0af699448548ad1a2fbf920fb4bee257eae39953ba95cb84891a0446a"
 dependencies = [
  "getrandom",
  "rand",
+ "serde",
  "uuid-macro-internal",
 ]
 

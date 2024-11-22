@@ -1,11 +1,42 @@
+use axum::extract::State;
+use axum::http::StatusCode;
+use axum::routing::post;
+use axum::Json;
 use axum::{response::IntoResponse, routing::get, Router};
 use eins_lib::cards;
 use eins_lib::game::Play;
+use eins_lib::infrastructure::Player;
+use serde::Deserialize;
+use std::collections::HashMap;
 use std::fmt::Write;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use uuid::Uuid;
+
+#[derive(Clone)]
+struct App {
+    players: Arc<RwLock<HashMap<Uuid, Player>>>,
+}
+
+impl App {
+    fn new() -> Self {
+        Self {
+            players: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct Registration {
+    nick: String,
+}
 
 #[tokio::main]
 async fn main() {
-    let app = Router::new().route("/", get(index));
+    let state = App::new();
+    let app = Router::new()
+        .route("/register", post(register).with_state(state.clone()))
+        .route("/", get(index).with_state(state));
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
         .await
@@ -14,7 +45,36 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn index() -> impl IntoResponse {
+async fn register(
+    State(state): State<App>,
+    registration: Json<Registration>,
+) -> Result<(StatusCode, Json<Player>), impl IntoResponse> {
+    let registration: Registration = registration.0;
+    if registration.nick.is_empty() || registration.nick.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "Nick cannot be empty"));
+    }
+
+    {
+        let read_lock = state.players.read().await;
+        let existing_nick = read_lock
+            .values()
+            .any(|p| p.get_nick() == &registration.nick);
+        if existing_nick {
+            return Err((
+                StatusCode::CONTINUE,
+                "Nick already in use, please choose another!",
+            ));
+        }
+    }
+
+    let mut write_lock = state.players.write_owned().await;
+    let player = Player::new(registration.nick);
+    let id = player.get_id();
+    write_lock.insert(id, player.clone());
+    Ok((StatusCode::CREATED, Json(player)))
+}
+
+async fn index(State(_state): State<App>) -> impl IntoResponse {
     let game = eins_lib::test().expect("Test should succeed!");
     let first_player = game
         .get_players()

@@ -9,4 +9,6 @@ edition = "2021"
 [dependencies]
 axum = "0.7.7"
 eins_lib = { path = "../eins_lib"}
+serde.workspace = true
 tokio = { version = "1.41", features = ["full"] }
+uuid.workspace = true

@@ -1,5 +1,6 @@
 pub mod cards;
 pub mod game;
+pub mod infrastructure;
 
 use game::{GameError, GameSession, GameSetup, Hand, Play};
 
