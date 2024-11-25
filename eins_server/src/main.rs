@@ -61,7 +61,7 @@ async fn register(
             .any(|p| p.get_nick() == &registration.nick);
         if existing_nick {
             return Err((
-                StatusCode::CONTINUE,
+                StatusCode::CONFLICT,
                 "Nick already in use, please choose another!",
             ));
         }
