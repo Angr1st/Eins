@@ -13,7 +13,7 @@ fn possible_next_card(
     current_card: CardReference,
     hand: &Vec<CardReference>,
     color_constraint_opt: Option<Color>,
-) -> Play {
+) -> GamePlay {
     let actual_card = cards::retrieve_card(&current_card);
     let possible_cards: Vec<CardReference> = hand
         .into_iter()
@@ -24,11 +24,11 @@ fn possible_next_card(
         .cloned()
         .collect();
     if possible_cards.len() == 0 {
-        Play::DrawCards {
+        GamePlay::DrawCards {
             draw_amount: DrawAction::DrawOne,
         }
     } else {
-        Play::PossibleCards {
+        GamePlay::PossibleCards {
             options: possible_cards,
         }
     }
@@ -43,6 +43,7 @@ pub struct ActualSession {
     current_player: usize,
     player_number: usize,
     game_id: Uuid,
+    creator_id: Uuid,
 }
 
 impl ActualSession {
@@ -52,6 +53,33 @@ impl ActualSession {
 
     pub fn get_players(self: &Self) -> &Vec<Hand> {
         &self.players
+    }
+}
+
+pub enum Game {
+    Setup(GameSession<GameSetup>),
+    Play(GameSession<GamePlay>),
+    Color(GameSession<ColorWish>),
+    Finished(GameSession<FinishGame>),
+}
+
+impl Game {
+    pub fn get_game_id(&self) -> &Uuid {
+        match self {
+            Game::Setup(a) => &a.session_state.game_id,
+            Game::Play(b) => &b.session_state.game_id,
+            Game::Color(c) => &c.session_state.game_id,
+            Game::Finished(d) => &d.session_state.game_id,
+        }
+    }
+
+    pub fn get_creator_id(&self) -> &Uuid {
+        match self {
+            Game::Setup(s) => &s.session_state.creator_id,
+            Game::Play(p) => &p.session_state.creator_id,
+            Game::Color(c) => &c.session_state.creator_id,
+            Game::Finished(f) => &f.session_state.creator_id,
+        }
     }
 }
 
@@ -65,7 +93,7 @@ pub struct GameSession<G: GameSessionState> {
 pub struct GameSetup {}
 
 #[derive(Debug)]
-pub enum Play {
+pub enum GamePlay {
     PossibleCards { options: Vec<CardReference> },
     DrawCards { draw_amount: DrawAction },
 }
@@ -88,9 +116,14 @@ pub enum GameError {
 
 trait GameSessionState {}
 impl GameSessionState for GameSetup {}
-impl GameSessionState for Play {}
+impl GameSessionState for GamePlay {}
 impl GameSessionState for ColorWish {}
 impl GameSessionState for FinishGame {}
+
+pub fn Create_Game(players: Vec<Hand>) -> Result<Game, GameError> {
+    let game_session = GameSession::new(players)?;
+    Ok(Game::Setup(game_session))
+}
 
 impl GameSession<GameSetup> {
     pub fn new(players: Vec<Hand>) -> Result<Self, GameError> {
@@ -105,6 +138,7 @@ impl GameSession<GameSetup> {
 
         let starting_card = GameSession::find_starting_card(&mut deck);
 
+        let creator_id = players[0].player_id.clone();
         let session = ActualSession {
             stack: vec![starting_card],
             deck,
@@ -113,6 +147,7 @@ impl GameSession<GameSetup> {
             current_player: 0,
             player_number,
             game_id: uuid::Uuid::new_v4(),
+            creator_id,
         };
 
         let init = Self {
@@ -152,7 +187,7 @@ impl GameSession<GameSetup> {
         self
     }
 
-    pub fn start_game(self: Self) -> GameSession<Play> {
+    pub fn start_game(self: Self) -> GameSession<GamePlay> {
         let current_card = self
             .session_state
             .stack
@@ -167,15 +202,15 @@ impl GameSession<GameSetup> {
                 self.session_state.current_player
             ));
         let next_play = possible_next_card(*current_card, &current_hand.held_cards, None);
-        GameSession::<Play> {
+        GameSession::<GamePlay> {
             session_state: self.session_state,
             game_state: next_play,
         }
     }
 }
 
-impl GameSession<Play> {
-    pub fn get_available_choices(&self) -> &Play {
+impl GameSession<GamePlay> {
+    pub fn get_available_choices(&self) -> &GamePlay {
         &self.game_state
     }
 }

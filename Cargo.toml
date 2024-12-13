@@ -9,6 +9,7 @@ members = [
 
 [workspace.dependencies] 
 serde = { version = "1.0.214", features = ["serde_derive"] }
+jiff = { version = "0.1", features = ["serde"] }
 
 [workspace.dependencies.uuid]
 version = "1.11.0"

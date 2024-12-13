@@ -2,9 +2,9 @@ pub mod cards;
 pub mod game;
 pub mod infrastructure;
 
-use game::{GameError, GameSession, GameSetup, Hand, Play};
+use game::{GameError, GamePlay, GameSession, GameSetup, Hand};
 
-pub fn test() -> Result<GameSession<Play>, GameError> {
+pub fn test() -> Result<GameSession<GamePlay>, GameError> {
     let hand_one = Hand::default();
     let hand_two = Hand::default();
     let players = vec![hand_one, hand_two];
