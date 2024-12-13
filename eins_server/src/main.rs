@@ -223,7 +223,6 @@ async fn register(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
-#[axum::debug_handler]
 async fn setup_game(
     headers: HeaderMap,
     State(state): State<App>,
