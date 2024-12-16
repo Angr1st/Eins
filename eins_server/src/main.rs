@@ -46,8 +46,7 @@ struct RegistrationResponse {
 
 #[derive(Deserialize)]
 struct Setup {
-    first_player: Uuid,
-    initial_code: Option<String>,
+    game_code: Option<String>,
 }
 
 struct GameSetup {
@@ -170,6 +169,11 @@ impl From<&GameSetup> for GameSetupResponse {
     }
 }
 
+#[derive(Deserialize)]
+struct GameSetupUpdate {
+    game_code: Option<String>,
+}
+
 #[tokio::main]
 async fn main() {
     let subscriber = FmtSubscriber::new();
@@ -226,15 +230,25 @@ async fn register(
 async fn setup_game(
     headers: HeaderMap,
     State(state): State<App>,
-    setup: Json<Setup>,
+    setup: Option<Json<Setup>>,
 ) -> Result<(StatusCode, Json<SetupResponse>), impl IntoResponse> {
-    let setup = setup.0;
     let header_code = headers.get("code");
     if let Some(code) = header_code {
+        let code = code.to_str();
+        if code.is_err() {
+            return Err((StatusCode::BAD_REQUEST, "code is malformed"));
+        }
+        let code = code.unwrap();
+        let player_id = Player::get_id_from_code(code);
+        if player_id.is_none() {
+            return Err((StatusCode::BAD_REQUEST, "code is malformed!"));
+        }
+        let player_id = player_id.unwrap();
+
         //Check if player exists with the same code
         {
             let read_lock = state.players.read_owned().await;
-            let existing_user = read_lock.get(&setup.first_player);
+            let existing_user = read_lock.get(&player_id);
             if let Some(user) = existing_user {
                 if user.get_code() != code {
                     return Err((
@@ -249,7 +263,7 @@ async fn setup_game(
         //Check for existing game_setups created by same user
         {
             let read_lock = state.setups.read().await;
-            let setup_option = read_lock.get(&setup.first_player);
+            let setup_option = read_lock.get(&player_id);
             if setup_option.is_some() {
                 return Err((
                     StatusCode::CONFLICT,
@@ -263,7 +277,7 @@ async fn setup_game(
             let read_lock = state.games.read_owned().await;
             let existing_games = read_lock
                 .iter()
-                .filter(|entry| entry.1.get_creator_id() == &setup.first_player);
+                .filter(|entry| entry.1.get_creator_id() == &player_id);
             if existing_games.count() > 0 {
                 return Err((
                     StatusCode::CONFLICT,
@@ -272,18 +286,60 @@ async fn setup_game(
             }
         }
         //Start a new game setup
-        let mut game_setup = GameSetup::new(setup.first_player.clone());
-        game_setup.update(setup.initial_code);
+        let mut game_setup = GameSetup::new(player_id.clone());
+        game_setup.update(setup.and_then(|opt| opt.0.game_code));
         let mut write_lock = state.setups.write_owned().await;
-        write_lock.insert(setup.first_player.clone(), game_setup);
+        write_lock.insert(player_id.clone(), game_setup);
         Ok((
             StatusCode::CREATED,
-            Json(SetupResponse {
-                game_id: setup.first_player,
-            }),
+            Json(SetupResponse { game_id: player_id }),
         ))
     } else {
         Err((StatusCode::UNAUTHORIZED, "Unauthorized"))
+    }
+}
+
+async fn update_code(
+    headers: HeaderMap,
+    State(state): State<App>,
+    setup_update: Option<Json<GameSetupUpdate>>,
+) -> Result<(StatusCode, Json<SetupResponse>), impl IntoResponse> {
+    let header_code = headers.get("code");
+    if let Some(code) = header_code {
+        let code = code.to_str();
+        if code.is_err() {
+            return Err((StatusCode::BAD_REQUEST, "code is malformed"));
+        }
+        let code = code.unwrap();
+        let player_id = Player::get_id_from_code(code);
+        if player_id.is_none() {
+            return Err((StatusCode::BAD_REQUEST, "code is malformed!"));
+        }
+        let player_id = player_id.unwrap();
+
+        //Check if player exists with the same code
+        {
+            let read_lock = state.players.read_owned().await;
+            let existing_user = read_lock.get(&player_id);
+            if let Some(user) = existing_user {
+                if user.get_code() != code {
+                    return Err((
+                        StatusCode::UNAUTHORIZED,
+                        "Code doesn't match the Players code.",
+                    ));
+                }
+            } else {
+                return Err((StatusCode::NOT_FOUND, "Player with id not found!"));
+            }
+        }
+        //Check for existing game_setups created by same user
+        {
+            let read_lock = state.setups.read().await;
+            let setup_option = read_lock.get(&player_id);
+            if setup_option.is_some() {}
+        }
+    } else {
+        return Err((StatusCode::UNAUTHORIZED, "Unauthorized"));
     }
 }
 
@@ -291,7 +347,13 @@ async fn get_players(State(state): State<App>) -> impl IntoResponse {
     let read_lock = state.players.read_owned().await;
     let players: Vec<PlayerResponse> = read_lock.iter().map(|(_, value)| value.into()).collect();
     let count = players.len();
-    tracing::info!("Currently {count} number of players");
+    if count == 0 {
+        tracing::info!("No players registered");
+    } else if count == 1 {
+        tracing::info!("Currently {count} registered player");
+    } else {
+        tracing::info!("Currently {count} registered players");
+    }
     let response = PlayersResponse { players };
     Json(response)
 }
