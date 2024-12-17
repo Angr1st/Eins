@@ -120,7 +120,7 @@ impl GameSessionState for GamePlay {}
 impl GameSessionState for ColorWish {}
 impl GameSessionState for FinishGame {}
 
-pub fn Create_Game(players: Vec<Hand>) -> Result<Game, GameError> {
+pub fn create_game(players: Vec<Hand>) -> Result<Game, GameError> {
     let game_session = GameSession::new(players)?;
     Ok(Game::Setup(game_session))
 }

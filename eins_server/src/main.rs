@@ -5,7 +5,7 @@ use axum::routing::post;
 use axum::Json;
 use axum::{response::IntoResponse, routing::get, Router};
 use eins_lib::cards;
-use eins_lib::game::{Create_Game, Game, GamePlay};
+use eins_lib::game::{create_game, Game, GamePlay};
 use eins_lib::infrastructure::Player;
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
