@@ -56,21 +56,37 @@ struct GameSetup {
     state: GameSetupState,
 }
 
+enum JoinGameSetupResult {
+    Success,
+    WrongCode,
+    SetupFull,
+}
+
 impl GameSetup {
     fn new(creator: Uuid) -> Self {
         Self {
             creator,
-            players: vec![],
+            players: vec![creator.clone()],
             code: None,
             state: GameSetupState::Open,
         }
     }
 
-    fn has_correct_code(&self, code: &str) -> bool {
+    fn join<'a>(&mut self, player: Uuid, code: Option<&'a str>) -> JoinGameSetupResult {
+        if self.has_correct_code(code) {
+            return self.add_player(player);
+        }
+        JoinGameSetupResult::WrongCode
+    }
+
+    fn has_correct_code<'a>(&self, code: Option<&'a str>) -> bool {
         if let Some(current_code) = &self.code {
-            return current_code == code;
-        } else {
+            if let Some(check_code) = code {
+                return current_code == check_code;
+            }
             return false;
+        } else {
+            return code.is_none();
         }
     }
 
@@ -92,15 +108,15 @@ impl GameSetup {
         self.state = new_state;
     }
 
-    fn add_player(&mut self, player: Uuid) -> Result<(), String> {
+    fn add_player(&mut self, player: Uuid) -> JoinGameSetupResult {
         if self.state == GameSetupState::Full {
-            return Err("Game is full".to_string());
+            return JoinGameSetupResult::SetupFull;
         }
         self.players.push(player);
         if self.players.len() == eins_lib::game::MAX_NUMBER_OF_PLAYERS {
             self.state = GameSetupState::Full;
         }
-        Ok(())
+        JoinGameSetupResult::Success
     }
 }
 
@@ -188,6 +204,14 @@ async fn main() {
             get(get_game_setups).with_state(state.clone()),
         )
         .route("/game/setup", post(setup_game).with_state(state.clone()))
+        .route(
+            "/game/setup/update",
+            post(update_code).with_state(state.clone()),
+        )
+        .route(
+            "/game/setup/join",
+            post(join_setup).with_state(state.clone()),
+        )
         .route("/", get(index).with_state(state));
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
@@ -334,12 +358,110 @@ async fn update_code(
         }
         //Check for existing game_setups created by same user
         {
-            let read_lock = state.setups.read().await;
-            let setup_option = read_lock.get(&player_id);
-            if setup_option.is_some() {}
+            let mut write_lock = state.setups.write_owned().await;
+            let setup_option = write_lock.get_mut(&player_id);
+            if let Some(setup) = setup_option {
+                if let Some(mut update) = setup_update {
+                    setup.update(update.game_code.take());
+                } else {
+                    setup.update(None);
+                }
+            }
+        }
+        Ok((StatusCode::OK, Json(SetupResponse { game_id: player_id })))
+    } else {
+        Err((StatusCode::UNAUTHORIZED, "Unauthorized"))
+    }
+}
+
+#[derive(Deserialize)]
+struct JoinRequest {
+    game_id: Uuid,
+    game_code: Option<String>,
+}
+
+#[derive(Serialize)]
+enum JoinResponseState {
+    Success,
+    Failure,
+}
+
+impl From<JoinGameSetupResult> for JoinResponseState {
+    fn from(value: JoinGameSetupResult) -> Self {
+        match value {
+            JoinGameSetupResult::Success => JoinResponseState::Success,
+            JoinGameSetupResult::WrongCode => JoinResponseState::Failure,
+            JoinGameSetupResult::SetupFull => JoinResponseState::Failure,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct JoinResponse {
+    game_id: Uuid,
+    state: JoinResponseState,
+}
+
+impl From<&JoinResponse> for bool {
+    fn from(val: &JoinResponse) -> Self {
+        match val.state {
+            JoinResponseState::Success => true,
+            JoinResponseState::Failure => false,
+        }
+    }
+}
+
+async fn join_setup(
+    headers: HeaderMap,
+    State(state): State<App>,
+    join_request: Json<JoinRequest>,
+) -> Result<(StatusCode, Json<JoinResponse>), impl IntoResponse> {
+    let join_request = join_request.0;
+    let header_code = headers.get("code");
+    if let Some(code) = header_code {
+        let code = code.to_str();
+        if code.is_err() {
+            return Err((StatusCode::BAD_REQUEST, "code is malformed"));
+        }
+        let code = code.unwrap();
+        let player_id = Player::get_id_from_code(code);
+        if player_id.is_none() {
+            return Err((StatusCode::BAD_REQUEST, "code is malformed!"));
+        }
+        let player_id = player_id.unwrap();
+
+        //Check if player exists with the same code
+        {
+            let read_lock = state.players.read_owned().await;
+            let existing_user = read_lock.get(&player_id);
+            if let Some(user) = existing_user {
+                if user.get_code() != code {
+                    return Err((
+                        StatusCode::UNAUTHORIZED,
+                        "Code doesn't match the Players code.",
+                    ));
+                }
+            } else {
+                return Err((StatusCode::NOT_FOUND, "Player with id not found!"));
+            }
+        }
+        //Check for existing game_setup
+        {
+            let mut write_lock = state.setups.write_owned().await;
+            let setup_option = write_lock.get_mut(&join_request.game_id);
+            if let Some(setup) = setup_option {
+                let join_result = setup.join(player_id, join_request.game_code.as_deref());
+                let join_response = JoinResponse {
+                    game_id: join_request.game_id,
+                    state: join_result.into(),
+                };
+                return Ok((StatusCode::OK, Json(join_response)));
+            } else {
+                return Err((StatusCode::NOT_FOUND, "Game setup not found"));
+            }
         }
     } else {
-        return Err((StatusCode::UNAUTHORIZED, "Unauthorized"));
+        Err((StatusCode::UNAUTHORIZED, "Unauthorized"))
     }
 }
 
