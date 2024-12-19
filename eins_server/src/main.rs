@@ -1,19 +1,16 @@
 use axum::extract::State;
-use axum::handler::Handler;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use axum::Json;
 use axum::{response::IntoResponse, routing::get, Router};
 use eins_lib::cards;
-use eins_lib::game::{create_game, Game, GamePlay};
+use eins_lib::game::{Game, GamePlay};
 use eins_lib::infrastructure::Player;
 use serde::{Deserialize, Serialize};
-use std::borrow::Borrow;
 use std::collections::HashMap;
-use std::fmt::{write, Display, Write};
+use std::fmt::{Display, Write};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::trace;
 use tracing_subscriber::FmtSubscriber;
 use uuid::Uuid;
 
@@ -91,7 +88,15 @@ impl GameSetup {
     }
 
     fn update(&mut self, new_code: Option<String>) {
-        self.code = new_code;
+        if let Some(code) = new_code {
+            if code.is_empty() || code.trim().is_empty() {
+                self.code = None;
+            } else {
+                self.code = Some(code);
+            }
+        } else {
+            self.code = new_code;
+        }
         let new_state = if self.code.is_some() {
             match self.state {
                 GameSetupState::Open => GameSetupState::Closed,
@@ -117,6 +122,21 @@ impl GameSetup {
             self.state = GameSetupState::Full;
         }
         JoinGameSetupResult::Success
+    }
+
+    fn remove_player(&mut self, player: Uuid) -> bool {
+        if !self.players.contains(&player) {
+            return false;
+        }
+        self.players.retain(|&el| el != player);
+        if self.state == GameSetupState::Full {
+            if self.code.is_some() {
+                self.state = GameSetupState::Closed;
+            } else {
+                self.state = GameSetupState::Open;
+            }
+        }
+        return true;
     }
 }
 
@@ -212,6 +232,10 @@ async fn main() {
             "/game/setup/join",
             post(join_setup).with_state(state.clone()),
         )
+        .route(
+            "/game/setup/leave",
+            post(leave_setup).with_state(state.clone()),
+        )
         .route("/", get(index).with_state(state));
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
@@ -271,7 +295,7 @@ async fn setup_game(
 
         //Check if player exists with the same code
         {
-            let read_lock = state.players.read_owned().await;
+            let read_lock = state.players.read().await;
             let existing_user = read_lock.get(&player_id);
             if let Some(user) = existing_user {
                 if user.get_code() != code {
@@ -310,10 +334,24 @@ async fn setup_game(
             }
         }
         //Start a new game setup
-        let mut game_setup = GameSetup::new(player_id.clone());
-        game_setup.update(setup.and_then(|opt| opt.0.game_code));
-        let mut write_lock = state.setups.write_owned().await;
-        write_lock.insert(player_id.clone(), game_setup);
+        {
+            let mut game_setup = GameSetup::new(player_id.clone());
+            game_setup.update(setup.and_then(|opt| opt.0.game_code));
+            let mut write_lock = state.setups.write_owned().await;
+            write_lock.insert(player_id.clone(), game_setup);
+        }
+
+        //Update Player State
+        {
+            let mut write_lock = state.players.write_owned().await;
+            let player_option = write_lock.get_mut(&player_id);
+            if let Some(player) = player_option {
+                player.create_game_setup();
+            } else {
+                unreachable!("Player should always exist at this point!");
+            }
+        }
+
         Ok((
             StatusCode::CREATED,
             Json(SetupResponse { game_id: player_id }),
@@ -343,7 +381,7 @@ async fn update_code(
 
         //Check if player exists with the same code
         {
-            let read_lock = state.players.read_owned().await;
+            let read_lock = state.players.read().await;
             let existing_user = read_lock.get(&player_id);
             if let Some(user) = existing_user {
                 if user.get_code() != code {
@@ -356,16 +394,30 @@ async fn update_code(
                 return Err((StatusCode::NOT_FOUND, "Player with id not found!"));
             }
         }
-        //Check for existing game_setups created by same user
+        //Check for existing game_setup created by same user
         {
             let mut write_lock = state.setups.write_owned().await;
             let setup_option = write_lock.get_mut(&player_id);
             if let Some(setup) = setup_option {
-                if let Some(mut update) = setup_update {
-                    setup.update(update.game_code.take());
+                if let Some(update) = setup_update {
+                    let mut game_code_option = update.0.game_code;
+                    if let Some(game_code) = game_code_option.as_deref() {
+                        tracing::info!("Updating code to {game_code}");
+                    }
+                    setup.update(game_code_option.take());
                 } else {
                     setup.update(None);
                 }
+            }
+        }
+        //Update Player State
+        {
+            let mut write_lock = state.players.write_owned().await;
+            let player_option = write_lock.get_mut(&player_id);
+            if let Some(player) = player_option {
+                player.update_game_setup();
+            } else {
+                unreachable!("Player should always exist at this point!");
             }
         }
         Ok((StatusCode::OK, Json(SetupResponse { game_id: player_id })))
@@ -432,7 +484,7 @@ async fn join_setup(
 
         //Check if player exists with the same code
         {
-            let read_lock = state.players.read_owned().await;
+            let read_lock = state.players.read().await;
             let existing_user = read_lock.get(&player_id);
             if let Some(user) = existing_user {
                 if user.get_code() != code {
@@ -455,6 +507,16 @@ async fn join_setup(
                     game_id: join_request.game_id,
                     state: join_result.into(),
                 };
+                //Update Player State
+                {
+                    let mut write_lock = state.players.write_owned().await;
+                    let player_option = write_lock.get_mut(&player_id);
+                    if let Some(player) = player_option {
+                        player.join_game_setup(join_response.game_id.clone());
+                    } else {
+                        unreachable!("Player should always exist at this point!");
+                    }
+                }
                 return Ok((StatusCode::OK, Json(join_response)));
             } else {
                 return Err((StatusCode::NOT_FOUND, "Game setup not found"));
@@ -462,6 +524,80 @@ async fn join_setup(
         }
     } else {
         Err((StatusCode::UNAUTHORIZED, "Unauthorized"))
+    }
+}
+
+async fn leave_setup(
+    headers: HeaderMap,
+    State(state): State<App>,
+) -> Result<StatusCode, impl IntoResponse> {
+    let header_code = headers.get("code");
+    if let Some(code) = header_code {
+        let code = code.to_str();
+        if code.is_err() {
+            return Err((StatusCode::BAD_REQUEST, "code is malformed"));
+        }
+        let code = code.unwrap();
+        let player_id = Player::get_id_from_code(code);
+        if player_id.is_none() {
+            return Err((StatusCode::BAD_REQUEST, "code is malformed!"));
+        }
+        let player_id = player_id.unwrap();
+        let game_id: Option<Uuid>;
+        //Check if player exists with the same code
+        {
+            let read_lock = state.players.read().await;
+            let existing_user = read_lock.get(&player_id);
+            if let Some(user) = existing_user {
+                if user.get_code() != code {
+                    return Err((
+                        StatusCode::UNAUTHORIZED,
+                        "Code doesn't match the Players code.",
+                    ));
+                } else if !user.has_joined_game_setup() {
+                    return Err((
+                        StatusCode::CONFLICT,
+                        "Player is currently not in a game setup",
+                    ));
+                } else {
+                    game_id = user.get_game_id();
+                }
+            } else {
+                return Err((StatusCode::NOT_FOUND, "Player with id not found!"));
+            }
+        }
+
+        let game_id = game_id.expect("game_id should be set");
+        //Check if player exists as member of specified game session
+        {
+            let mut write_lock = state.setups.write_owned().await;
+            let game_setup_option = write_lock.get_mut(&game_id);
+            if let Some(game_setup) = game_setup_option {
+                let remove_success = game_setup.remove_player(player_id);
+                if remove_success {
+                    //Update Player State
+                    {
+                        let mut write_lock = state.players.write_owned().await;
+                        let player_option = write_lock.get_mut(&player_id);
+                        if let Some(player) = player_option {
+                            player.leave();
+                        } else {
+                            unreachable!("Player should always exist at this point!");
+                        }
+                    }
+                    return Ok(StatusCode::NO_CONTENT);
+                } else {
+                    return Err((
+                        StatusCode::NOT_FOUND,
+                        "Player is not part of that game setup",
+                    ));
+                }
+            } else {
+                return Err((StatusCode::NOT_FOUND, "Game setup doesn't exist"));
+            }
+        }
+    } else {
+        return Err((StatusCode::UNAUTHORIZED, "Unauthorized"));
     }
 }
 
