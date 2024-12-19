@@ -56,6 +56,14 @@ impl Player {
         }
     }
 
+    pub fn has_created_game_setup(&self) -> bool {
+        match self.state {
+            PlayerState::GameSetupCreated => true,
+            PlayerState::GameSetupUpdated => true,
+            _ => false,
+        }
+    }
+
     pub fn has_joined_game_setup(&self) -> bool {
         match self.state {
             PlayerState::GameSetupJoined(_) => true,
