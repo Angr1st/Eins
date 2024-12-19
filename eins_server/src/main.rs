@@ -672,6 +672,24 @@ async fn leave_setup(
     }
 }
 
+#[derive(Serialize)]
+struct GameSetupStateResponse {}
+
+async fn get_game_setup(
+    headers: HeaderMap,
+    State(state): State<App>,
+) -> Result<(StatusCode, Json<GameSetupStateResponse>), impl IntoResponse> {
+}
+
+#[derive(Serialize)]
+struct GameStateResponse {}
+
+async fn start_game(
+    headers: HeaderMap,
+    State(state): State<App>,
+) -> Result<(StatusCode, Json<GameStateResponse>), impl IntoResponse> {
+}
+
 async fn get_players(State(state): State<App>) -> impl IntoResponse {
     let read_lock = state.players.read_owned().await;
     let players: Vec<PlayerResponse> = read_lock.iter().map(|(_, value)| value.into()).collect();
