@@ -54,9 +54,14 @@ struct Setup {
 
 struct GameSetup {
     creator: Uuid,
-    players: Vec<Uuid>,
+    players: Vec<GameSetupPlayer>,
     code: Option<String>,
     state: GameSetupState,
+}
+
+struct GameSetupPlayer {
+    id: Uuid,
+    nick: String,
 }
 
 enum JoinGameSetupResult {
@@ -66,16 +71,20 @@ enum JoinGameSetupResult {
 }
 
 impl GameSetup {
-    fn new(creator: Uuid) -> Self {
+    fn new(player: &Player) -> Self {
+        let player_id = player.get_id();
         Self {
-            creator,
-            players: vec![creator.clone()],
+            creator: player_id.clone(),
+            players: vec![GameSetupPlayer {
+                id: player_id,
+                nick: player.get_nick().to_string(),
+            }],
             code: None,
             state: GameSetupState::Open,
         }
     }
 
-    fn join<'a>(&mut self, player: Uuid, code: Option<&'a str>) -> JoinGameSetupResult {
+    fn join<'a>(&mut self, player: &Player, code: Option<&'a str>) -> JoinGameSetupResult {
         if self.has_correct_code(code) {
             return self.add_player(player);
         }
@@ -119,10 +128,14 @@ impl GameSetup {
         self.state = new_state;
     }
 
-    fn add_player(&mut self, player: Uuid) -> JoinGameSetupResult {
+    fn add_player(&mut self, player: &Player) -> JoinGameSetupResult {
         if self.state == GameSetupState::Full {
             return JoinGameSetupResult::SetupFull;
         }
+        let player = GameSetupPlayer {
+            id: player.get_id(),
+            nick: player.get_nick().to_string(),
+        };
         self.players.push(player);
         if self.players.len() == eins_lib::game::MAX_NUMBER_OF_PLAYERS {
             self.state = GameSetupState::Full;
@@ -131,10 +144,10 @@ impl GameSetup {
     }
 
     fn remove_player(&mut self, player: Uuid) -> bool {
-        if !self.players.contains(&player) {
+        if !self.players.iter().find(|gsp| gsp.id == player).is_none() {
             return false;
         }
-        self.players.retain(|&el| el != player);
+        self.players.retain(|el| el.id != player);
         if self.state == GameSetupState::Full {
             if self.code.is_some() {
                 self.state = GameSetupState::Closed;
@@ -230,6 +243,10 @@ async fn main() {
             "/game/setup",
             get(get_game_setups).with_state(state.clone()),
         )
+        .route(
+            "/game/setup/me",
+            get(get_game_setup).with_state(state.clone()),
+        )
         .route("/game/setup", post(setup_game).with_state(state.clone()))
         .route(
             "/game/setup/update",
@@ -242,8 +259,7 @@ async fn main() {
         .route(
             "/game/setup/leave",
             post(leave_setup).with_state(state.clone()),
-        )
-        .route("/", get(index).with_state(state));
+        );
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
         .await
@@ -343,7 +359,7 @@ async fn setup_game(
             return Err((StatusCode::BAD_REQUEST, "code is malformed!"));
         }
         let player_id = player_id.unwrap();
-
+        let player;
         //Check if player exists with the same code
         {
             let read_lock = state.players.read().await;
@@ -355,6 +371,7 @@ async fn setup_game(
                         "Code doesn't match the Players code.",
                     ));
                 }
+                player = user.clone();
             } else {
                 return Err((StatusCode::NOT_FOUND, "Player with id not found!"));
             }
@@ -386,7 +403,7 @@ async fn setup_game(
         }
         //Start a new game setup
         {
-            let mut game_setup = GameSetup::new(player_id.clone());
+            let mut game_setup = GameSetup::new(&player);
             game_setup.update(setup.and_then(|opt| opt.0.game_code));
             let mut write_lock = state.setups.write_owned().await;
             write_lock.insert(player_id.clone(), game_setup);
@@ -532,7 +549,7 @@ async fn join_setup(
             return Err((StatusCode::BAD_REQUEST, "code is malformed!"));
         }
         let player_id = player_id.unwrap();
-
+        let player;
         //Check if player exists with the same code
         {
             let read_lock = state.players.read().await;
@@ -544,6 +561,7 @@ async fn join_setup(
                         "Code doesn't match the Players code.",
                     ));
                 }
+                player = user.clone();
             } else {
                 return Err((StatusCode::NOT_FOUND, "Player with id not found!"));
             }
@@ -553,7 +571,7 @@ async fn join_setup(
             let mut write_lock = state.setups.write_owned().await;
             let setup_option = write_lock.get_mut(&join_request.game_id);
             if let Some(setup) = setup_option {
-                let join_result = setup.join(player_id, join_request.game_code.as_deref());
+                let join_result = setup.join(&player, join_request.game_code.as_deref());
                 let join_response = JoinResponse {
                     game_id: join_request.game_id,
                     state: join_result.into(),
@@ -595,7 +613,7 @@ async fn leave_setup(
         }
         let player_id = player_id.unwrap();
         let game_id: Option<Uuid>;
-        let mut is_creator = false;
+        let is_creator;
         //Check if player exists with the same code
         {
             let read_lock = state.players.read().await;
@@ -632,7 +650,7 @@ async fn leave_setup(
                         //Update Player State
                         {
                             let mut write_lock = state.players.write().await;
-                            let player_option = write_lock.get_mut(&player);
+                            let player_option = write_lock.get_mut(&player.id);
                             if let Some(player) = player_option {
                                 player.leave();
                             } else {
@@ -673,12 +691,83 @@ async fn leave_setup(
 }
 
 #[derive(Serialize)]
-struct GameSetupStateResponse {}
+struct GameSetupStateResponse {
+    id: Uuid,
+    players: Vec<GameSetupStatePlayerResponse>,
+}
+
+#[derive(Serialize)]
+struct GameSetupStatePlayerResponse {
+    id: Uuid,
+    nick: String,
+}
 
 async fn get_game_setup(
     headers: HeaderMap,
     State(state): State<App>,
 ) -> Result<(StatusCode, Json<GameSetupStateResponse>), impl IntoResponse> {
+    let header_code = headers.get("code");
+    if let Some(code) = header_code {
+        let code = code.to_str();
+        if code.is_err() {
+            return Err((StatusCode::BAD_REQUEST, "code is malformed"));
+        }
+        let code = code.unwrap();
+        let player_id = Player::get_id_from_code(code);
+        if player_id.is_none() {
+            return Err((StatusCode::BAD_REQUEST, "code is malformed!"));
+        }
+        let player_id = player_id.unwrap();
+        let game_id: Option<Uuid>;
+        //Check if player exists with the same code
+        {
+            let read_lock = state.players.read().await;
+            let existing_user = read_lock.get(&player_id);
+            if let Some(user) = existing_user {
+                if user.get_code() != code {
+                    return Err((
+                        StatusCode::UNAUTHORIZED,
+                        "Code doesn't match the Players code.",
+                    ));
+                } else if user.has_joined_game_setup() || user.has_created_game_setup() {
+                    game_id = user.get_game_id();
+                } else {
+                    return Err((
+                        StatusCode::CONFLICT,
+                        "Player is currently not in a game setup",
+                    ));
+                }
+            } else {
+                return Err((StatusCode::NOT_FOUND, "Player with id not found!"));
+            }
+        }
+
+        let game_id = game_id.expect("game_id should be set");
+        //Check if player exists as member of specified game session
+        {
+            let read_lock = state.setups.read_owned().await;
+            let game_setup_option = read_lock.get(&game_id);
+            if let Some(game_setup) = game_setup_option {
+                let players = game_setup
+                    .players
+                    .iter()
+                    .map(|p| GameSetupStatePlayerResponse {
+                        id: p.id.clone(),
+                        nick: p.nick.clone(),
+                    })
+                    .collect();
+                let game_setup_state_response = GameSetupStateResponse {
+                    id: game_id,
+                    players,
+                };
+                return Ok((StatusCode::OK, Json(game_setup_state_response)));
+            } else {
+                return Err((StatusCode::NOT_FOUND, "Game setup doesn't exist"));
+            }
+        }
+    } else {
+        return Err((StatusCode::UNAUTHORIZED, "Unauthorized"));
+    }
 }
 
 #[derive(Serialize)]
@@ -688,6 +777,7 @@ async fn start_game(
     headers: HeaderMap,
     State(state): State<App>,
 ) -> Result<(StatusCode, Json<GameStateResponse>), impl IntoResponse> {
+    return Err(StatusCode::INTERNAL_SERVER_ERROR);
 }
 
 async fn get_players(State(state): State<App>) -> impl IntoResponse {
@@ -712,35 +802,4 @@ async fn get_game_setups(State(state): State<App>) -> impl IntoResponse {
     tracing::info!("Currently {count} number of game setups");
     let response = GameSetupsResponse { setups };
     Json(response)
-}
-
-async fn index(State(_state): State<App>) -> impl IntoResponse {
-    let game = eins_lib::test().expect("Test should succeed!");
-    let first_player = game
-        .get_players()
-        .first()
-        .expect("There is always a first player");
-    // format!("{}", game);
-    let mut output = String::new();
-    writeln!(output, "Current card: {:?}", game.get_current_card()).unwrap();
-    writeln!(output, "Current hand cards:").unwrap();
-    let hand = first_player.get_held_cards();
-    for card_ref in hand.iter() {
-        let card = cards::get_card(card_ref);
-        writeln!(output, "Card: {:?}", card).unwrap();
-    }
-    writeln!(output, "Choices of the current player.").unwrap();
-    let choices = game.get_available_choices();
-    match choices {
-        GamePlay::PossibleCards { options } => {
-            for card_ref in options {
-                let card = cards::get_card(card_ref);
-                writeln!(output, "Card: {:?}", card).unwrap();
-            }
-        }
-        GamePlay::DrawCards { draw_amount } => {
-            writeln!(output, "you have to draw: {:?}", draw_amount).unwrap()
-        }
-    }
-    output
 }
