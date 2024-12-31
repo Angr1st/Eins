@@ -8,8 +8,10 @@ use eins_lib::cards;
 use eins_lib::game::{Game, GamePlay};
 use eins_lib::infrastructure::Player;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{Display, Write};
+use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing_subscriber::FmtSubscriber;
@@ -57,6 +59,7 @@ struct GameSetup {
     players: Vec<GameSetupPlayer>,
     code: Option<String>,
     state: GameSetupState,
+    is_ready: bool,
 }
 
 struct GameSetupPlayer {
@@ -81,11 +84,17 @@ impl GameSetup {
             }],
             code: None,
             state: GameSetupState::Open,
+            is_ready: false,
         }
+    }
+
+    fn set_is_ready(&mut self) {
+        self.is_ready = self.players.len() > 1;
     }
 
     fn join<'a>(&mut self, player: &Player, code: Option<&'a str>) -> JoinGameSetupResult {
         if self.has_correct_code(code) {
+            self.set_is_ready();
             return self.add_player(player);
         }
         JoinGameSetupResult::WrongCode
@@ -103,6 +112,9 @@ impl GameSetup {
     }
 
     fn update(&mut self, new_code: Option<String>) {
+        if self.state == GameSetupState::Started {
+            panic!("Game Setup has been started! Code cannot be changed now");
+        }
         if let Some(code) = new_code {
             if code.is_empty() || code.trim().is_empty() {
                 self.code = None;
@@ -117,12 +129,14 @@ impl GameSetup {
                 GameSetupState::Open => GameSetupState::Closed,
                 GameSetupState::Closed => GameSetupState::Closed,
                 GameSetupState::Full => GameSetupState::Full,
+                GameSetupState::Started => GameSetupState::Started,
             }
         } else {
             match self.state {
                 GameSetupState::Closed => GameSetupState::Open,
                 GameSetupState::Open => GameSetupState::Open,
                 GameSetupState::Full => GameSetupState::Full,
+                GameSetupState::Started => GameSetupState::Started,
             }
         };
         self.state = new_state;
@@ -155,6 +169,7 @@ impl GameSetup {
                 self.state = GameSetupState::Open;
             }
         }
+        self.set_is_ready();
         return true;
     }
 }
@@ -164,6 +179,7 @@ enum GameSetupState {
     Open,
     Closed,
     Full,
+    Started,
 }
 
 impl Display for GameSetupState {
@@ -173,6 +189,7 @@ impl Display for GameSetupState {
             GameSetupState::Open => write!(f, "Open"),
             GameSetupState::Closed => write!(f, "Closed"),
             GameSetupState::Full => write!(f, "Full"),
+            GameSetupState::Started => write!(f, "Started"),
         }
     }
 }
@@ -259,6 +276,10 @@ async fn main() {
         .route(
             "/game/setup/leave",
             post(leave_setup).with_state(state.clone()),
+        )
+        .route(
+            "/game/setup/start",
+            post(start_game).with_state(state.clone()),
         );
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
@@ -771,13 +792,92 @@ async fn get_game_setup(
 }
 
 #[derive(Serialize)]
-struct GameStateResponse {}
+struct GameStateResponse {
+    game_id: Uuid,
+}
 
 async fn start_game(
     headers: HeaderMap,
     State(state): State<App>,
 ) -> Result<(StatusCode, Json<GameStateResponse>), impl IntoResponse> {
-    return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    let header_code = headers.get("code");
+    if let Some(code) = header_code {
+        let code = code.to_str();
+        if code.is_err() {
+            return Err((StatusCode::BAD_REQUEST, Cow::from("code is malformed")));
+        }
+        let code = code.unwrap();
+        let player_id = Player::get_id_from_code(code);
+        if player_id.is_none() {
+            return Err((StatusCode::BAD_REQUEST, Cow::from("code is malformed!")));
+        }
+        let player_id = player_id.unwrap();
+        let game_id: Option<Uuid>;
+        //Check if player exists with the same code
+        {
+            let read_lock = state.players.read().await;
+            let existing_user = read_lock.get(&player_id);
+            if let Some(user) = existing_user {
+                if user.get_code() != code {
+                    return Err((
+                        StatusCode::UNAUTHORIZED,
+                        Cow::from("Code doesn't match the Players code."),
+                    ));
+                } else if user.has_created_game_setup() {
+                    game_id = user.get_game_id();
+                } else if user.has_joined_game_setup() {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        Cow::from("Only the player who created the game setup can start the game"),
+                    ));
+                } else {
+                    return Err((
+                        StatusCode::CONFLICT,
+                        Cow::from("Player is currently not in a game setup"),
+                    ));
+                }
+            } else {
+                return Err((
+                    StatusCode::NOT_FOUND,
+                    Cow::from("Player with id not found!"),
+                ));
+            }
+        }
+
+        let game_id = game_id.expect("game_id should be set");
+        //Check if player exists as member of specified game session
+        {
+            let mut write_lock_setup = state.setups.write_owned().await;
+            let game_setup_option = write_lock_setup.get_mut(&game_id);
+            if let Some(game_setup) = game_setup_option {
+                if !game_setup.is_ready {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        Cow::from("Game setup is not ready to start yet"),
+                    ));
+                }
+                let mut write_lock_game = state.games.write_owned().await;
+                let new_game =
+                    eins_lib::game::Game::new(game_setup.players.iter().map(|p| p.id).collect());
+                match new_game {
+                    Ok(game) => {
+                        write_lock_game.insert(game_setup.creator, game);
+                        game_setup.set_is_ready();
+                        let response = GameStateResponse { game_id };
+                        Ok((StatusCode::OK, Json(response)))
+                    }
+                    Err(game_error) => {
+                        let err_msg = format!("Error: {}", game_error);
+                        Err((StatusCode::BAD_REQUEST, Cow::from(err_msg)))
+                    }
+                }
+            } else {
+                return Err((StatusCode::NOT_FOUND, Cow::from("Game setup doesn't exist")));
+            }
+        }
+    } else {
+        return Err((StatusCode::UNAUTHORIZED, Cow::from("Unauthorized")));
+    }
 }
 
 async fn get_players(State(state): State<App>) -> impl IntoResponse {

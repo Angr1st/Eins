@@ -130,6 +130,6 @@ impl Player {
 
 impl From<&Player> for Hand {
     fn from(value: &Player) -> Self {
-        Hand::new(Some(value.id))
+        Hand::new(value.id)
     }
 }

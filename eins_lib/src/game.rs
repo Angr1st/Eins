@@ -3,7 +3,7 @@ use std::fmt::Display;
 use uuid::Uuid;
 
 use crate::cards::{
-    self, create_deck, get_card, CardAction, CardReference, CardTypes, Color, DrawAction, ALL_CARDS,
+    self, create_deck, get_card, CardAction, CardReference, CardTypes, Color, DrawAction,
 };
 
 pub const INITIAL_HAND_CARDS: usize = 7;
@@ -64,6 +64,12 @@ pub enum Game {
 }
 
 impl Game {
+    ///By convention the first players Id is also the game id.
+    pub fn new(players: Vec<Uuid>) -> Result<Self, GameError> {
+        let actual_session = GameSession::new(players)?;
+        Ok(Game::Setup(actual_session))
+    }
+
     pub fn get_game_id(&self) -> &Uuid {
         match self {
             Game::Setup(a) => &a.session_state.game_id,
@@ -114,19 +120,23 @@ pub enum GameError {
     ToManyPlayers,
 }
 
+impl Display for GameError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GameError::NotEnoughPlayers => write!(f, "Not enough players"),
+            GameError::ToManyPlayers => write!(f, "To many players"),
+        }
+    }
+}
+
 trait GameSessionState {}
 impl GameSessionState for GameSetup {}
 impl GameSessionState for GamePlay {}
 impl GameSessionState for ColorWish {}
 impl GameSessionState for FinishGame {}
 
-pub fn create_game(players: Vec<Hand>) -> Result<Game, GameError> {
-    let game_session = GameSession::new(players)?;
-    Ok(Game::Setup(game_session))
-}
-
 impl GameSession<GameSetup> {
-    pub fn new(players: Vec<Hand>) -> Result<Self, GameError> {
+    pub fn new(players: Vec<Uuid>) -> Result<Self, GameError> {
         let player_number: usize = players.len();
         if player_number < 2 {
             return Err(GameError::NotEnoughPlayers);
@@ -138,11 +148,11 @@ impl GameSession<GameSetup> {
 
         let starting_card = GameSession::find_starting_card(&mut deck);
 
-        let creator_id = players[0].player_id.clone();
+        let creator_id = players[0].clone();
         let session = ActualSession {
             stack: vec![starting_card],
             deck,
-            players,
+            players: players.iter().map(|&id| id.into()).collect(),
             game_direction: GameDirection::Clockwise,
             current_player: 0,
             player_number,
@@ -266,13 +276,11 @@ pub struct Hand {
 }
 
 impl Hand {
-    pub fn new(id_opt: Option<Uuid>) -> Self {
-        let player_id = id_opt.unwrap_or_else(|| Uuid::new_v4());
-
+    pub fn new(id: Uuid) -> Self {
         Hand {
             held_cards: vec![],
             status: HandState::Playing,
-            player_id,
+            player_id: id,
         }
     }
 
@@ -281,9 +289,15 @@ impl Hand {
     }
 }
 
+impl From<Uuid> for Hand {
+    fn from(value: Uuid) -> Self {
+        Hand::new(value)
+    }
+}
+
 impl Default for Hand {
     fn default() -> Self {
-        Hand::new(Some(Uuid::new_v4()))
+        Self::new(Uuid::new_v4())
     }
 }
 
