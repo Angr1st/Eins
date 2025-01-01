@@ -54,6 +54,10 @@ impl ActualSession {
     pub fn get_players(self: &Self) -> &Vec<Hand> {
         &self.players
     }
+
+    pub fn get_number_of_players(&self) -> usize {
+        self.player_number
+    }
 }
 
 pub enum Game {
@@ -86,6 +90,10 @@ impl Game {
             Game::Color(c) => &c.session_state.creator_id,
             Game::Finished(f) => &f.session_state.creator_id,
         }
+    }
+
+    pub fn get_game_session_state(&self) -> &str {
+        self.get_game_session_state()
     }
 }
 
@@ -217,11 +225,31 @@ impl GameSession<GameSetup> {
             game_state: next_play,
         }
     }
+
+    pub fn get_game_session_state(&self) -> &str {
+        "Setup"
+    }
 }
 
 impl GameSession<GamePlay> {
     pub fn get_available_choices(&self) -> &GamePlay {
         &self.game_state
+    }
+
+    pub fn get_game_session_state(&self) -> &str {
+        "Play"
+    }
+}
+
+impl GameSession<ColorWish> {
+    pub fn get_game_session_state(&self) -> &str {
+        "Color Wish"
+    }
+}
+
+impl GameSession<FinishGame> {
+    pub fn get_game_session_state(&self) -> &str {
+        "Finished"
     }
 }
 
