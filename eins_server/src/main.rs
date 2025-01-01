@@ -94,8 +94,9 @@ impl GameSetup {
 
     fn join<'a>(&mut self, player: &Player, code: Option<&'a str>) -> JoinGameSetupResult {
         if self.has_correct_code(code) {
+            let result = self.add_player(player);
             self.set_is_ready();
-            return self.add_player(player);
+            return result;
         }
         JoinGameSetupResult::WrongCode
     }
@@ -246,6 +247,18 @@ struct GameSetupUpdate {
     game_code: Option<String>,
 }
 
+#[derive(Serialize)]
+struct GamesResponse {
+    games: Vec<GameResponse>,
+}
+
+#[derive(Serialize)]
+struct GameResponse {
+    id: Uuid,
+    number_of_players: usize,
+    state: String,
+}
+
 #[tokio::main]
 async fn main() {
     let subscriber = FmtSubscriber::new();
@@ -280,7 +293,8 @@ async fn main() {
         .route(
             "/game/setup/start",
             post(start_game).with_state(state.clone()),
-        );
+        )
+        .route("/game", get(get_games).with_state(state));
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
         .await
@@ -901,5 +915,21 @@ async fn get_game_setups(State(state): State<App>) -> impl IntoResponse {
     let count = setups.len();
     tracing::info!("Currently {count} number of game setups");
     let response = GameSetupsResponse { setups };
+    Json(response)
+}
+
+async fn get_games(State(state): State<App>) -> impl IntoResponse {
+    let read_lock = state.games.read_owned().await;
+    let games: Vec<GameResponse> = read_lock
+        .iter()
+        .map(|(_, value)| GameResponse {
+            id: value.get_game_id().clone(),
+            number_of_players: 1,
+            state: String::from("Started"),
+        })
+        .collect();
+    let count = games.len();
+    tracing::info!("Currently {count} number of games");
+    let response = GamesResponse { games };
     Json(response)
 }
