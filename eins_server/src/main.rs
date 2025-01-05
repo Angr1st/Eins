@@ -729,6 +729,7 @@ async fn leave_setup(
 struct GameSetupStateResponse {
     id: Uuid,
     players: Vec<GameSetupStatePlayerResponse>,
+    is_ready: bool,
 }
 
 #[derive(Serialize)]
@@ -794,6 +795,7 @@ async fn get_game_setup(
                 let game_setup_state_response = GameSetupStateResponse {
                     id: game_id,
                     players,
+                    is_ready: game_setup.is_ready,
                 };
                 return Ok((StatusCode::OK, Json(game_setup_state_response)));
             } else {
