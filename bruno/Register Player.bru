@@ -1,0 +1,17 @@
+meta {
+  name: Register Player
+  type: http
+  seq: 3
+}
+
+post {
+  url: http://127.0.0.1:8080/player/register
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "nick": "First"
+  }
+}
