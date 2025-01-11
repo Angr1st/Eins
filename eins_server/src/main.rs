@@ -294,13 +294,26 @@ async fn main() {
             "/game/setup/start",
             post(start_game).with_state(state.clone()),
         )
-        .route("/game", get(get_games).with_state(state));
+        .route("/game", get(get_games).with_state(state))
+        .route("/health", get(get_app_health));
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
         .await
         .unwrap();
     println!("listening on {}", listener.local_addr().unwrap());
     axum::serve(listener, app).await.unwrap();
+}
+
+#[derive(Serialize)]
+struct AppHealth {
+    status: String,
+}
+
+async fn get_app_health() -> impl IntoResponse {
+    let status = AppHealth {
+        status: "Ready".into(),
+    };
+    (StatusCode::OK, Json(status))
 }
 
 async fn register(
