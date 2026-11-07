@@ -236,8 +236,13 @@ impl From<&GameSetup> for GameSetupResponse {
     }
 }
 
+/// Usage: `eins_server [address]`, by default `127.0.0.1:8080`. Use `0.0.0.0:8080` to accept
+/// connections from other machines.
 #[tokio::main]
 async fn main() {
+    let address = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "127.0.0.1:8080".to_string());
     let subscriber = FmtSubscriber::new();
 
     tracing::subscriber::set_global_default(subscriber).unwrap();
@@ -252,9 +257,13 @@ async fn main() {
     });
     let app = app(state);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
-        .await
-        .unwrap();
+    let listener = match tokio::net::TcpListener::bind(&address).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            eprintln!("Cannot listen on {address}: {error}");
+            std::process::exit(1);
+        }
+    };
     println!("listening on {}", listener.local_addr().unwrap());
     axum::serve(listener, app).await.unwrap();
 }
