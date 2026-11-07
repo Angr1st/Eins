@@ -1,0 +1,14 @@
+services:
+  eins-api:
+    command: cargo run -p eins_server --locked
+    port: 8080
+    health: /health
+
+  eins-web:
+    command: trunk serve --release --locked --address 0.0.0.0 --port "$PORT"
+    cwd: eins_web
+    port: 8082
+    health: /api/health
+    portal:
+      title: Eins web client
+      description: Choose a nickname to play. Open a fresh tab for another player. Server restarts reset games and sessions.

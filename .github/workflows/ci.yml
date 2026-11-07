@@ -29,3 +29,30 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --locked
+
+      - name: Install WebAssembly target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Check browser client
+        run: cargo clippy -p eins_web --target wasm32-unknown-unknown --locked -- -D warnings
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk@0.22.1
+
+      - name: Build web release
+        working-directory: eins_web
+        run: trunk build --release --locked
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: eins_web/package-lock.json
+
+      - name: Test browser gameplay
+        working-directory: eins_web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npm test

@@ -4,7 +4,8 @@ resolver = "2"
 members = [
     "eins_lib",
     "eins_server",
-    "eins_client"
+    "eins_client",
+    "eins_web"
 ]
 
 [workspace.dependencies] 

@@ -1,3 +1,6 @@
 */target
 /target
 /.amp/portals/*
+/eins_web/dist/
+/eins_web/node_modules/
+/eins_web/test-results/

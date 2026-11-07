@@ -28,6 +28,16 @@ mise trust "$repo_root/mise.toml"
 # Prefer upstream prebuilt cargo-edit binaries over compiling the CLI from scratch.
 time MISE_CARGO_BINSTALL_NATIVE=true mise install --yes
 
+echo 'Installing browser build prerequisites'
+time mise exec -- rustup target add wasm32-unknown-unknown
+if ! trunk --version 2>/dev/null | grep -q '^trunk 0.22.1$'; then
+  archive="trunk-$(uname -m)-unknown-linux-musl.tar.gz"
+  temporary="$(mktemp -d)"
+  trap 'rm -rf "$temporary"' EXIT
+  curl -LsSf "https://github.com/trunk-rs/trunk/releases/download/v0.22.1/$archive" -o "$temporary/trunk.tar.gz"
+  tar -xzf "$temporary/trunk.tar.gz" -C "$HOME/.local/bin" trunk
+fi
+
 # Amp and supervised services use non-interactive login shells, not .bashrc.
 # Export the full mise environment there without changing unrelated projects.
 profile_marker='# Eins orb toolchain'
@@ -46,3 +56,4 @@ fi
 
 echo 'Caching locked workspace dependencies'
 time mise exec -- cargo fetch --locked
+time npm ci --prefix eins_web

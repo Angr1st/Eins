@@ -1,0 +1,14 @@
+[build]
+target = "index.html"
+
+[watch]
+# Test output and installed Node packages must not reload an active game.
+watch = ["src", "index.html", "style.css", "Cargo.toml", "../eins_lib/src", "../eins_lib/Cargo.toml", "../Cargo.toml", "../Cargo.lock"]
+
+[serve]
+addresses = ["127.0.0.1"]
+port = 8082
+
+[[proxy]]
+backend = "http://127.0.0.1:8080/"
+rewrite = "/api/"

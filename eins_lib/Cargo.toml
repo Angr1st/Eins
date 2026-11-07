@@ -12,5 +12,11 @@ serde.workspace = true
 uuid.workspace = true
 jiff.workspace = true
 
+# Browser backends for the same library used by the native server and client.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.4", features = ["wasm_js"] }
+uuid = { workspace = true, features = ["js"] }
+jiff = { workspace = true, features = ["js"] }
+
 [dev-dependencies]
 serde_json = "1.0.154"

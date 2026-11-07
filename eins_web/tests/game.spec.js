@@ -1,0 +1,139 @@
+import { test, expect } from '@playwright/test';
+
+test('two browsers share a private table, moves, and the result', async ({ browser, baseURL }) => {
+  const hostContext = await browser.newContext();
+  const guestContext = await browser.newContext();
+  try {
+    const host = await hostContext.newPage();
+    const guest = await guestContext.newPage();
+    const suffix = crypto.randomUUID().slice(0, 8);
+    const names = [`Host-${suffix}`, `Guest-${suffix}`];
+    const pages = [host, guest];
+    const errors = [];
+    for (const [i, page] of pages.entries()) {
+      page.on('pageerror', error => errors.push(error.message));
+      await page.goto(baseURL);
+      await page.getByLabel('What should we call you?').fill(names[i]);
+      await page.getByRole('button', { name: 'Find a table' }).click();
+      await expect(page.getByRole('heading', { name: 'The lobby' })).toBeVisible();
+    }
+
+    await host.getByRole('button', { name: 'Create private table' }).click();
+    await host.getByLabel('Game code', { exact: true }).fill('friends');
+    await host.getByRole('button', { name: 'Create table', exact: true }).click();
+    await expect(host.getByRole('button', { name: 'Start game' })).toBeDisabled();
+    await guest.locator('.table-row').filter({ hasText: names[0] }).getByRole('button', { name: 'Join table' }).click();
+    await guest.getByLabel('Game code', { exact: true }).fill('wrong');
+    await guest.getByRole('button', { name: 'Join with code' }).click();
+    await expect(guest.getByRole('alert')).toContainText('Wrong game code');
+    await guest.getByLabel('Game code', { exact: true }).fill('friends');
+    await guest.getByRole('button', { name: 'Join with code' }).click();
+    // These updates must arrive over SSE, without reloading either page.
+    await expect(host.getByRole('button', { name: 'Start game' })).toBeEnabled();
+    await expect(guest.getByRole('button', { name: 'Start game' })).toHaveCount(0);
+    await host.getByRole('button', { name: 'Start game' }).click();
+    for (const page of pages) await expect(page.getByRole('button', { name: /^Play / })).toHaveCount(7);
+    await guest.reload();
+    await expect(guest.getByRole('button', { name: /^Play / })).toHaveCount(7);
+
+    // Inspect the public game API to check exact hand counts after a draw, not just a changed screen.
+    const view = page => page.evaluate(async () => {
+      const response = await fetch('/api/game/me', { headers: { code: sessionStorage.getItem('eins.player-code') } });
+      return response.json();
+    });
+    const first = await view(host);
+    const active = first.turn.current_player === first.players[0].id ? host : guest;
+    const waiting = active === host ? guest : host;
+    await expect(waiting.getByRole('button', { name: /^Draw / })).toBeDisabled();
+    await expect(waiting.locator('.hand button:enabled')).toHaveCount(0);
+    const beforeDraw = await view(active);
+    const expectedCount = beforeDraw.hand.length + Math.max(1, beforeDraw.turn.pending_draw);
+    await active.getByRole('button', { name: /^Draw / }).click();
+    await expect(active.getByRole('button', { name: /^Play / })).toHaveCount(expectedCount);
+    await expect(waiting.getByRole('heading', { name: 'Your move.', exact: true })).toBeVisible();
+
+    // Draw until a wild card is available, regardless of the shuffled deal. Never mock the rules.
+    let playedWild = false;
+    for (let turn = 0; turn < 108 && !playedWild; turn++) {
+      const state = await view(host);
+      const player = state.turn.current_player === state.players[0].id ? host : guest;
+      const other = player === host ? guest : host;
+      await expect(player.getByRole('button', { name: /^Draw / })).toBeEnabled();
+      const wild = player.locator('.hand button.Wild:enabled').first();
+      if (await wild.count()) {
+        const handCount = await player.getByRole('button', { name: /^Play / }).count();
+        await player.getByRole('button', { name: 'Call Eins!', exact: true }).click();
+        await wild.click();
+        await expect(player.getByRole('group', { name: 'Choose the next color' })).toBeVisible();
+        await player.keyboard.press('Escape');
+        await expect(player.getByRole('group', { name: 'Choose the next color' })).toHaveCount(0);
+        await wild.click();
+        await player.getByRole('button', { name: 'Blue', exact: true }).click();
+        await expect(player.getByRole('button', { name: /^Play / })).toHaveCount(handCount - 1);
+        await expect(player.getByRole('button', { name: 'Call Eins!', exact: true })).toHaveAttribute('aria-pressed', 'false');
+        await expect(other.locator('.active-color')).toHaveText('Blue');
+        expect((await view(other)).turn.color).toBe('Blue');
+        playedWild = true;
+      } else {
+        await player.getByRole('button', { name: /^Draw / }).click();
+        await expect(other.getByRole('heading', { name: 'Your move.', exact: true })).toBeVisible();
+      }
+    }
+    expect(playedWild).toBe(true);
+
+    let playedNormal = false;
+    for (let turn = 0; turn < 108 && !playedNormal; turn++) {
+      const state = await view(host);
+      const player = state.turn.current_player === state.players[0].id ? host : guest;
+      const other = player === host ? guest : host;
+      await expect(player.getByRole('button', { name: /^Draw / })).toBeEnabled();
+      const card = player.locator('.hand button:enabled:not(.Wild)').first();
+      if (await card.count()) {
+        const label = (await card.getAttribute('aria-label')).replace('Play ', 'Top card: ');
+        const count = await player.getByRole('button', { name: /^Play / }).count();
+        await card.click();
+        await expect(player.getByRole('button', { name: /^Play / })).toHaveCount(count - 1);
+        await expect(other.locator('.discard')).toHaveAttribute('aria-label', label);
+        playedNormal = true;
+      } else {
+        await player.getByRole('button', { name: /^Draw / }).click();
+        await expect(other.getByRole('heading', { name: 'Your move.', exact: true })).toBeVisible();
+      }
+    }
+    expect(playedNormal).toBe(true);
+
+    // A peer leaving ends the two-player game, then both can return to the lobby.
+    await guest.getByRole('button', { name: 'Leave game', exact: true }).click();
+    await expect(host.getByRole('heading', { name: 'You win!', exact: true })).toBeVisible();
+    await host.getByRole('button', { name: 'Back to lobby' }).click();
+    for (const page of pages) await expect(page.getByRole('heading', { name: 'The lobby' })).toBeVisible();
+    expect(errors).toEqual([]);
+  } finally {
+    await hostContext.close();
+    await guestContext.close();
+  }
+});
+
+test('a session no longer known by the server can register again', async ({ page }) => {
+  await page.addInitScript(() => {
+    sessionStorage.setItem('eins.player-code', '00000000-0000-4000-8000-000000000000');
+  });
+  await page.goto('/');
+  await expect(page.getByRole('alert')).toContainText('Your session has ended');
+  await expect(page.getByLabel('What should we call you?')).toBeVisible();
+  expect(await page.evaluate(() => sessionStorage.getItem('eins.player-code'))).toBeNull();
+  await page.getByLabel('What should we call you?').fill(`Returning-${crypto.randomUUID().slice(0, 8)}`);
+  await page.getByRole('button', { name: 'Find a table' }).click();
+  await expect(page.getByRole('heading', { name: 'The lobby' })).toBeVisible();
+});
+
+test('an empty proxy failure is visible and registration can be retried', async ({ page }) => {
+  await page.route('**/api/player/register', route => route.fulfill({ status: 503, body: '' }));
+  await page.goto('/');
+  await page.getByLabel('What should we call you?').fill(`Retry-${crypto.randomUUID().slice(0, 8)}`);
+  await page.getByRole('button', { name: 'Find a table' }).click();
+  await expect(page.getByRole('alert')).toContainText('503');
+  await page.unroute('**/api/player/register');
+  await page.getByRole('button', { name: 'Find a table' }).click();
+  await expect(page.getByRole('heading', { name: 'The lobby' })).toBeVisible();
+});
