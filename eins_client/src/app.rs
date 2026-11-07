@@ -418,6 +418,16 @@ impl App {
                 self.status = OFFLINE.into();
                 false
             }
+            Notice::Expired => {
+                let nick = self.me.take().map(|p| p.get_nick().to_string());
+                self.prompt = None;
+                self.screen = Screen::Register {
+                    nick: nick.unwrap_or_default(),
+                };
+                self.status =
+                    "You were signed out by the server. Press Enter to register again.".into();
+                false
+            }
             Notice::Event(ServerEvent::Resync) => true,
             Notice::Event(ServerEvent::Lobby) => {
                 matches!(self.screen, Screen::Lobby { .. } | Screen::Waiting { .. })

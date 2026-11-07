@@ -8,16 +8,23 @@ use axum::{response::IntoResponse, routing::get, Router};
 use eins_lib::api::*;
 use eins_lib::game::{Game, GameView, MoveError};
 use eins_lib::infrastructure::Player;
+use jiff::{SignedDuration, Timestamp};
 use serde::Serialize;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::convert::Infallible;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::sync::{broadcast, RwLock};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::{Stream, StreamExt};
 use tracing_subscriber::FmtSubscriber;
 use uuid::Uuid;
+
+/// Players without a request or an open event stream for this long are removed.
+const PLAYER_TTL: SignedDuration = SignedDuration::from_mins(10);
+/// How often the server looks for idle players.
+const SWEEP_EVERY: Duration = Duration::from_secs(30);
 
 #[derive(Clone)]
 struct App {
@@ -25,6 +32,8 @@ struct App {
     setups: Arc<RwLock<HashMap<Uuid, GameSetup>>>,
     games: Arc<RwLock<HashMap<Uuid, Game>>>,
     events: broadcast::Sender<ServerEvent>,
+    /// Number of open event streams per player.
+    streams: Arc<Mutex<HashMap<Uuid, usize>>>,
 }
 
 impl App {
@@ -34,6 +43,7 @@ impl App {
             setups: Arc::new(RwLock::new(HashMap::new())),
             games: Arc::new(RwLock::new(HashMap::new())),
             events: broadcast::channel(64).0,
+            streams: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -41,6 +51,47 @@ impl App {
     fn notify(&self, event: ServerEvent) {
         // Sending only fails when no client is listening.
         let _ = self.events.send(event);
+    }
+
+    /// Removes players who have been idle for longer than `PLAYER_TTL` at `now`. They leave
+    /// their game setup or game first, so the other players can carry on, and their nick
+    /// becomes free again. Players with an open event stream are never idle; their activity
+    /// is refreshed so the timeout starts when the stream closes.
+    async fn expire_idle_players(&self, now: Timestamp) {
+        let cutoff = now - PLAYER_TTL;
+        let connected: Vec<Uuid> = self.streams.lock().unwrap().keys().copied().collect();
+        let idle: Vec<Uuid> = {
+            let mut players = self.players.write().await;
+            for id in &connected {
+                if let Some(player) = players.get_mut(id) {
+                    player.touch();
+                }
+            }
+            players
+                .values()
+                .filter(|p| p.last_activity() < cutoff && !connected.contains(&p.get_id()))
+                .map(Player::get_id)
+                .collect()
+        };
+
+        for id in &idle {
+            // Leaving goes through the same handlers as the player's own requests. Errors only
+            // mean there was nothing to leave.
+            let Some(player) = self.players.read().await.get(id).cloned() else {
+                continue;
+            };
+            tracing::info!("Removing idle player {}", player.get_nick());
+            if player.has_created_game_setup() || player.has_joined_game_setup() {
+                let _ = leave_setup(State(self.clone()), AuthPlayer(player.clone())).await;
+            }
+            if player.is_in_game() {
+                let _ = leave_game(State(self.clone()), AuthPlayer(player)).await;
+            }
+            self.players.write().await.remove(id);
+        }
+        if !idle.is_empty() {
+            self.notify(ServerEvent::Lobby);
+        }
     }
 
     async fn update_player(&self, player_id: Uuid, update: impl FnOnce(&mut Player)) {
@@ -190,7 +241,16 @@ async fn main() {
     let subscriber = FmtSubscriber::new();
 
     tracing::subscriber::set_global_default(subscriber).unwrap();
-    let app = app(App::new());
+    let state = App::new();
+    let sweeper = state.clone();
+    tokio::spawn(async move {
+        let mut sweep = tokio::time::interval(SWEEP_EVERY);
+        loop {
+            sweep.tick().await;
+            sweeper.expire_idle_players(Timestamp::now()).await;
+        }
+    });
+    let app = app(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
         .await
@@ -274,9 +334,9 @@ impl FromRequestParts<App> for AuthPlayer {
             .map_err(|_| (StatusCode::BAD_REQUEST, "code is malformed"))?;
         let player_id = Player::get_id_from_code(code)
             .ok_or((StatusCode::BAD_REQUEST, "code is malformed!"))?;
-        let players = state.players.read().await;
+        let mut players = state.players.write().await;
         let player = players
-            .get(&player_id)
+            .get_mut(&player_id)
             .ok_or((StatusCode::NOT_FOUND, "Player with id not found!"))?;
         if player.get_code() != code {
             return Err((
@@ -284,7 +344,36 @@ impl FromRequestParts<App> for AuthPlayer {
                 "Code doesn't match the Players code.",
             ));
         }
+        player.touch();
         Ok(AuthPlayer(player.clone()))
+    }
+}
+
+/// Counts an open event stream for its player while it lives.
+struct StreamGuard {
+    streams: Arc<Mutex<HashMap<Uuid, usize>>>,
+    player_id: Uuid,
+}
+
+impl StreamGuard {
+    fn open(state: &App, player_id: Uuid) -> Self {
+        *state.streams.lock().unwrap().entry(player_id).or_default() += 1;
+        Self {
+            streams: state.streams.clone(),
+            player_id,
+        }
+    }
+}
+
+impl Drop for StreamGuard {
+    fn drop(&mut self) {
+        let mut streams = self.streams.lock().unwrap();
+        if let Some(count) = streams.get_mut(&self.player_id) {
+            *count -= 1;
+            if *count == 0 {
+                streams.remove(&self.player_id);
+            }
+        }
     }
 }
 
@@ -640,9 +729,12 @@ async fn leave_game(
 /// Server-sent events: one `ServerEvent` as JSON data per change.
 async fn events(
     State(state): State<App>,
-    AuthPlayer(_): AuthPlayer,
+    AuthPlayer(player): AuthPlayer,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let stream = BroadcastStream::new(state.events.subscribe()).map(|received| {
+    // The guard lives inside the stream, so it is dropped when the client disconnects.
+    let guard = StreamGuard::open(&state, player.get_id());
+    let stream = BroadcastStream::new(state.events.subscribe()).map(move |received| {
+        let _connected = &guard;
         // A client that falls too far behind has missed events and must refresh everything.
         let event = received.unwrap_or(ServerEvent::Resync);
         Ok(Event::default()
@@ -702,13 +794,28 @@ mod tests {
 
     struct Client {
         app: Router,
+        state: App,
     }
 
     impl Client {
         fn new() -> Self {
+            let state = App::new();
             Self {
-                app: app(App::new()),
+                app: app(state.clone()),
+                state,
             }
+        }
+
+        /// Opens `GET /events` for a player; the stream stays open while the body is kept.
+        async fn open_events(&self, code: &str) -> Body {
+            let request = Request::builder()
+                .uri("/events")
+                .header("code", code)
+                .body(Body::empty())
+                .unwrap();
+            let response = self.app.clone().oneshot(request).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            response.into_body()
         }
 
         async fn call(
@@ -1129,5 +1236,87 @@ mod tests {
         );
         c.call("POST", "/game/draw", Some(current), None).await;
         assert_eq!(next_event(&mut events, wait).await, Some(game));
+    }
+
+    /// A moment after everyone's activity so far has timed out.
+    fn after_timeout() -> Timestamp {
+        Timestamp::now() + PLAYER_TTL + SignedDuration::from_secs(1)
+    }
+
+    #[tokio::test]
+    async fn idle_players_are_removed_and_free_their_nick() {
+        let c = Client::new();
+        let (alice_id, alice) = c.register("alice").await;
+        let (_, bob) = c.register("bob").await;
+        c.call("POST", "/game/setup", Some(&alice), None).await;
+        c.join(&bob, &alice_id, None).await;
+
+        c.state.expire_idle_players(Timestamp::now()).await;
+        assert_eq!(
+            c.state_of(&bob).await,
+            json!({ "GameSetupJoined": alice_id })
+        );
+
+        // Every authenticated request counts as activity.
+        let last_activity = |me: Value| -> Timestamp {
+            me["player"]["last_activity"]
+                .as_str()
+                .unwrap()
+                .parse()
+                .unwrap()
+        };
+        let first = last_activity(c.call("GET", "/player/me", Some(&bob), None).await.1);
+        let second = last_activity(c.call("GET", "/player/me", Some(&bob), None).await.1);
+        assert!(second > first);
+
+        c.state.expire_idle_players(after_timeout()).await;
+        let (status, _) = c.call("GET", "/player/me", Some(&alice), None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(
+            c.call("GET", "/player", None, None).await.1["players"],
+            json!([])
+        );
+        assert_eq!(
+            c.call("GET", "/game/setup", None, None).await.1["setups"],
+            json!([])
+        );
+        c.register("alice").await;
+    }
+
+    #[tokio::test]
+    async fn requests_and_open_event_streams_keep_players() {
+        let c = Client::new();
+        let (alice_id, alice) = c.register("alice").await;
+        let (_, bob) = c.register("bob").await;
+        let (carol_id, carol) = c.register("carol").await;
+        c.call("POST", "/game/setup", Some(&alice), None).await;
+        c.join(&bob, &alice_id, None).await;
+        c.join(&carol, &alice_id, None).await;
+        c.call("POST", "/game/setup/start", Some(&alice), None)
+            .await;
+
+        // Only carol keeps her client connected. Alice and bob leave the game when they
+        // are removed, so carol is the last player left and wins.
+        let events = c.open_events(&carol).await;
+        c.state.expire_idle_players(after_timeout()).await;
+        let (_, view) = c.call("GET", "/game/me", Some(&carol), None).await;
+        assert_eq!(
+            (&view["state"], &view["winner"]),
+            (&json!("Finished"), &json!(carol_id))
+        );
+        let players = c.call("GET", "/player", None, None).await.1["players"].clone();
+        assert_eq!(players.as_array().unwrap().len(), 1);
+
+        drop(events);
+        // Once her client disconnects and she stays idle, she goes too, and so does the game.
+        c.state.expire_idle_players(after_timeout()).await;
+        assert_eq!(
+            c.call("GET", "/player/me", Some(&carol), None).await.0,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            c.call("GET", "/game", None, None).await.1["games"],
+            json!([])
+        );
     }
 }

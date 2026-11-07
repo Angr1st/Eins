@@ -9,6 +9,7 @@ edition = "2021"
 [dependencies]
 axum = { version = "0.8.9", features = ["macros"] }
 eins_lib = { path = "../eins_lib"}
+jiff.workspace = true
 serde.workspace = true
 tokio = { version = "1.54", features = ["full"] }
 tokio-stream = { version = "0.1.19", features = ["sync"] }

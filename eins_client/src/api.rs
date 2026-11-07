@@ -10,7 +10,7 @@ use eins_lib::cards::{CardReference, Color};
 use eins_lib::game::GameView;
 use eins_lib::infrastructure::Player;
 use reqwest::blocking::{Client, RequestBuilder};
-use reqwest::Method;
+use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
@@ -18,6 +18,8 @@ use uuid::Uuid;
 pub enum Notice {
     Connected,
     Disconnected,
+    /// The server no longer knows this player: they were idle too long, or it restarted.
+    Expired,
     Event(ServerEvent),
 }
 
@@ -158,6 +160,12 @@ impl Api {
                 .expect("the HTTP client can be built");
             loop {
                 let response = http.get(&url).header("code", &code).send();
+                if let Ok(response) = &response {
+                    if response.status() == StatusCode::NOT_FOUND {
+                        let _ = notices.send(Notice::Expired);
+                        return;
+                    }
+                }
                 if let Ok(response) = response.and_then(|r| r.error_for_status()) {
                     if notices.send(Notice::Connected).is_err() {
                         return;

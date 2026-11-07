@@ -122,6 +122,15 @@ impl Player {
         self.update_activity(PlayerState::GameJoined(game_id));
     }
 
+    /// Records that the player did something now.
+    pub fn touch(&mut self) {
+        self.last_activity = Timestamp::now();
+    }
+
+    pub fn last_activity(&self) -> Timestamp {
+        self.last_activity
+    }
+
     fn update_activity(&mut self, state: PlayerState) {
         self.state = state;
         self.last_activity = Timestamp::now();

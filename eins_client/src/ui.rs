@@ -780,4 +780,18 @@ mod tests {
         assert!(!shows(&screen, "Start (s)"));
         assert!(shows(&screen, "Waiting for the host to start…"));
     }
+
+    #[test]
+    fn a_signed_out_player_can_register_again() {
+        let mut app = app("alice");
+        let cards = [c(CardColor::Red, ColorSymbol::One)];
+        let view = game(&app, &cards, &[0], Some("alice"));
+        show_game(&mut app, view);
+
+        app.on_notice(crate::api::Notice::Expired);
+        assert!(app.me.is_none());
+        let screen = render(&mut app);
+        assert!(shows(&screen, "Nick: alice"));
+        assert!(shows(&screen, "signed out by the server"));
+    }
 }
