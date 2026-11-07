@@ -64,6 +64,13 @@ impl Player {
         matches!(self.state, PlayerState::GameSetupJoined(_))
     }
 
+    pub fn is_in_game(&self) -> bool {
+        matches!(
+            self.state,
+            PlayerState::GameStarted | PlayerState::GameJoined(_)
+        )
+    }
+
     pub fn get_game_id(&self) -> Option<Uuid> {
         match self.state {
             PlayerState::Free => None,

@@ -1,6 +1,7 @@
 use std::fmt::Display;
 
 use rand::{rng, seq::SliceRandom};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::cards::{
@@ -125,6 +126,72 @@ impl Game {
         }
     }
 
+    /// Moves from setup to play. Games in any other state stay as they are.
+    pub fn start(self) -> Game {
+        match self {
+            Game::Setup(setup) => Game::Play(setup.start_game()),
+            other => other,
+        }
+    }
+
+    /// What `player` may see of the game: their own hand, but only the card counts of
+    /// everyone else. `None` if `player` is not part of the game.
+    pub fn view(&self, player: Uuid) -> Option<GameView> {
+        let session = self.session();
+        let own_hand = session.players.iter().find(|h| h.player_id == player)?;
+        let turn = match self {
+            Game::Play(play) => Some(TurnView {
+                current_player: *play.get_current_player(),
+                color: play.get_color(),
+                pending_draw: play.get_pending_draw(),
+                playable: if *play.get_current_player() == player {
+                    play.playable_cards()
+                } else {
+                    vec![]
+                },
+            }),
+            _ => None,
+        };
+        let winner = match self {
+            Game::Finished(finished) => Some(*finished.get_winner()),
+            _ => None,
+        };
+        Some(GameView {
+            game_id: session.game_id,
+            state: self.get_game_session_state().to_string(),
+            players: session
+                .players
+                .iter()
+                .map(|h| PlayerView {
+                    id: h.player_id,
+                    card_count: h.held_cards.len(),
+                })
+                .collect(),
+            hand: own_hand
+                .held_cards
+                .iter()
+                .map(|&id| HandCard {
+                    id,
+                    card: get_card(&id),
+                })
+                .collect(),
+            top_card: session.top_card(),
+            direction: session.game_direction,
+            turn,
+            winner,
+        })
+    }
+
+    /// `player` leaves a running game. Their cards are shuffled into the draw pile and, if it
+    /// was their turn, the next player continues (including any pending +2 stack). When only
+    /// one player is left, they win.
+    pub fn leave(self, player: Uuid) -> (Game, Result<(), MoveError>) {
+        match self {
+            Game::Play(session) => session.leave(player),
+            other => (other, Err(MoveError::GameNotRunning)),
+        }
+    }
+
     /// `player` plays `card`. Wild cards need a `color_wish`; other cards must not have one.
     /// `called_eins` is the player's "Eins" call for when this play leaves them with one card.
     /// A rejected move leaves the game unchanged.
@@ -191,6 +258,7 @@ impl Display for GameError {
 #[derive(Debug, PartialEq)]
 pub enum MoveError {
     GameNotRunning,
+    NotInGame,
     NotYourTurn,
     CardNotInHand,
     CardNotPlayable,
@@ -202,6 +270,7 @@ impl Display for MoveError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             MoveError::GameNotRunning => write!(f, "The game is not running"),
+            MoveError::NotInGame => write!(f, "You are not part of this game"),
             MoveError::NotYourTurn => write!(f, "It is not your turn"),
             MoveError::CardNotInHand => write!(f, "The card is not in your hand"),
             MoveError::CardNotPlayable => write!(f, "The card cannot be played now"),
@@ -442,6 +511,46 @@ impl GameSession<GamePlay> {
         (Game::Play(next), Ok(()))
     }
 
+    fn leave(self, player: Uuid) -> (Game, Result<(), MoveError>) {
+        let Some(index) = self
+            .session_state
+            .players
+            .iter()
+            .position(|h| h.player_id == player)
+        else {
+            return (Game::Play(self), Err(MoveError::NotInGame));
+        };
+        let GameSession {
+            session_state: mut session,
+            game_state: state,
+        } = self;
+
+        if index == session.current_player {
+            session.advance(1);
+        }
+        let hand = session.players.remove(index);
+        session.player_number -= 1;
+        if index < session.current_player {
+            session.current_player -= 1;
+        }
+        session.deck.extend(hand.held_cards);
+        session.deck.shuffle(&mut rng());
+
+        if session.player_number == 1 {
+            let winner = session.players[0].player_id;
+            let finished = GameSession {
+                session_state: session,
+                game_state: FinishGame { winner },
+            };
+            return (Game::Finished(finished), Ok(()));
+        }
+        let next = GameSession {
+            session_state: session,
+            game_state: state,
+        };
+        (Game::Play(next), Ok(()))
+    }
+
     fn draw(self, player: Uuid) -> (Game, Result<(), MoveError>) {
         if let Err(error) = self.check_turn(player) {
             return (Game::Play(self), Err(error));
@@ -526,7 +635,45 @@ impl Default for Hand {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
+/// One player's view of a game, as sent to their client.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GameView {
+    pub game_id: Uuid,
+    pub state: String,
+    /// All players in seating order with the number of cards they hold.
+    pub players: Vec<PlayerView>,
+    /// The viewing player's own cards.
+    pub hand: Vec<HandCard>,
+    pub top_card: CardTypes,
+    pub direction: GameDirection,
+    /// Set while the game is running.
+    pub turn: Option<TurnView>,
+    /// Set once the game is finished.
+    pub winner: Option<Uuid>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PlayerView {
+    pub id: Uuid,
+    pub card_count: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HandCard {
+    pub id: CardReference,
+    pub card: CardTypes,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TurnView {
+    pub current_player: Uuid,
+    pub color: Color,
+    pub pending_draw: usize,
+    /// The viewing player's playable cards; empty when it is not their turn.
+    pub playable: Vec<CardReference>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum GameDirection {
     #[default]
     Clockwise,
@@ -1024,5 +1171,106 @@ mod tests {
             })
             .collect();
         assert!(first.len() > 1);
+    }
+
+    #[test]
+    fn the_view_shows_only_the_own_hand_and_own_options() {
+        let game = playing(
+            &[c(Red, Five)],
+            &[
+                &[c(Red, One), c(Blue, Two)],
+                &[c(Red, Seven), c(Green, Three), c(Red, Eight)],
+            ],
+            &[],
+        );
+        let (alice, bob) = (id(&game, 0), id(&game, 1));
+
+        let alices = game.view(alice).unwrap();
+        let alice_cards: Vec<CardTypes> = alices.hand.iter().map(|h| h.card).collect();
+        assert_eq!(alice_cards, vec![c(Red, One), c(Blue, Two)]);
+        let counts: Vec<(Uuid, usize)> = alices
+            .players
+            .iter()
+            .map(|p| (p.id, p.card_count))
+            .collect();
+        assert_eq!(counts, vec![(alice, 2), (bob, 3)]);
+        let turn = alices.turn.unwrap();
+        assert_eq!((turn.current_player, turn.color), (alice, Red));
+        assert_eq!(turn.playable, vec![alices.hand[0].id]);
+
+        let bobs = game.view(bob).unwrap();
+        assert_eq!(bobs.hand.len(), 3);
+        assert!(bobs.turn.unwrap().playable.is_empty());
+        assert!(game.view(Uuid::new_v4()).is_none());
+
+        // Bob's cards appear nowhere in Alice's view.
+        let json = serde_json::to_string(&game.view(alice).unwrap()).unwrap();
+        assert!(!json.contains("Seven") && !json.contains("Green"));
+    }
+
+    fn leave(game: Game, player: usize) -> Game {
+        let player = id(&game, player);
+        let (game, result) = game.leave(player);
+        result.unwrap();
+        game
+    }
+
+    fn four_players(current: usize, direction: GameDirection) -> Game {
+        let mut game = playing(
+            &[c(Red, Five)],
+            &[
+                &[c(Red, One), c(Red, Two)],
+                &[c(Blue, One)],
+                &[c(Blue, Two)],
+                &[c(Blue, Three)],
+            ],
+            &[],
+        );
+        if let Game::Play(session) = &mut game {
+            session.session_state.current_player = current;
+            session.session_state.game_direction = direction;
+        }
+        game
+    }
+
+    #[test]
+    fn leaving_on_your_turn_passes_the_turn_on() {
+        let game = four_players(0, GameDirection::Clockwise);
+        let bob = id(&game, 1);
+        let game = leave(game, 0);
+        assert_eq!(id(&game, current(&game)), bob);
+        assert_eq!(game.session().players.len(), 3);
+        // The leaver's two cards went into the draw pile.
+        assert_eq!(game.session().deck.len(), 2);
+
+        let game = four_players(0, GameDirection::CounterClockwise);
+        let dave = id(&game, 3);
+        let game = leave(game, 0);
+        assert_eq!(id(&game, current(&game)), dave);
+    }
+
+    #[test]
+    fn leaving_out_of_turn_keeps_the_current_player() {
+        for leaver in [0, 1, 3] {
+            let game = four_players(2, GameDirection::Clockwise);
+            let carol = id(&game, 2);
+            let game = leave(game, leaver);
+            assert_eq!(id(&game, current(&game)), carol, "leaver {leaver}");
+        }
+    }
+
+    #[test]
+    fn the_last_player_left_wins() {
+        let game = playing(&[c(Red, Five)], &[&[c(Red, One)], &[c(Red, Two)]], &[]);
+        let alice = id(&game, 0);
+        let (game, result) = game.leave(Uuid::new_v4());
+        assert_eq!(result, Err(MoveError::NotInGame));
+
+        let game = leave(game, 1);
+        let Game::Finished(finished) = &game else {
+            panic!("the game should be finished");
+        };
+        assert_eq!(finished.get_winner(), &alice);
+        assert_eq!(game.view(alice).unwrap().winner, Some(alice));
     }
 }

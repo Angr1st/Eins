@@ -46,7 +46,7 @@ impl TryFrom<usize> for CardReference {
     }
 }
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Copy, Clone, Serialize, Deserialize)]
 pub enum Color {
     Red,
     Blue,
@@ -54,7 +54,7 @@ pub enum Color {
     Green,
 }
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Copy, Clone, Serialize, Deserialize)]
 pub enum ColorSymbol {
     Zero,
     One,
@@ -71,13 +71,13 @@ pub enum ColorSymbol {
     Skip,
 }
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Copy, Clone, Serialize, Deserialize)]
 pub enum WildSymbol {
     ChooseColor,
     DrawFour,
 }
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Copy, Clone, Serialize, Deserialize)]
 pub enum CardTypes {
     Normal(ColorCard),
     Wild(WildCard),
@@ -104,13 +104,13 @@ impl CardTypes {
     }
 }
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Copy, Clone, Serialize, Deserialize)]
 pub struct ColorCard {
     pub color: Color,
     pub symbol: ColorSymbol,
 }
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Copy, Clone, Serialize, Deserialize)]
 pub struct WildCard {
     pub symbol: WildSymbol,
 }
