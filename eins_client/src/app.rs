@@ -484,16 +484,7 @@ impl App {
             }
             Screen::Game { .. } => {
                 match self.api.game() {
-                    Ok(new_view) => {
-                        let unknown = new_view
-                            .players
-                            .iter()
-                            .any(|p| !self.nicks.contains_key(&p.id));
-                        if unknown {
-                            self.load_nicks();
-                        }
-                        self.show_view(new_view);
-                    }
+                    Ok(new_view) => self.show_view(new_view),
                     Err(error) => {
                         // Not in a game any more: back to the lobby.
                         if self.api.me().is_ok_and(|me| !me.is_in_game()) {

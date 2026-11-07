@@ -92,8 +92,9 @@ pub enum Game {
 }
 
 impl Game {
-    ///By convention the first players Id is also the game id.
-    pub fn new(players: Vec<Uuid>) -> Result<Self, GameError> {
+    /// `players` are (id, nick) pairs in seating order. By convention the first player's id
+    /// is also the game id.
+    pub fn new(players: Vec<(Uuid, String)>) -> Result<Self, GameError> {
         let actual_session = GameSession::new(players)?;
         Ok(Game::Setup(actual_session))
     }
@@ -164,6 +165,7 @@ impl Game {
                 .iter()
                 .map(|h| PlayerView {
                     id: h.player_id,
+                    nick: h.nick.clone(),
                     card_count: h.held_cards.len(),
                 })
                 .collect(),
@@ -286,7 +288,7 @@ impl GameSessionState for GamePlay {}
 impl GameSessionState for FinishGame {}
 
 impl GameSession<GameSetup> {
-    pub fn new(players: Vec<Uuid>) -> Result<Self, GameError> {
+    pub fn new(players: Vec<(Uuid, String)>) -> Result<Self, GameError> {
         let player_number: usize = players.len();
         if player_number < 2 {
             return Err(GameError::NotEnoughPlayers);
@@ -298,11 +300,14 @@ impl GameSession<GameSetup> {
 
         let starting_card = GameSession::find_starting_card(&mut deck);
 
-        let creator_id = players[0];
+        let creator_id = players[0].0;
         let session = ActualSession {
             stack: vec![starting_card],
             deck,
-            players: players.iter().map(|&id| id.into()).collect(),
+            players: players
+                .into_iter()
+                .map(|(id, nick)| Hand::new(id, nick))
+                .collect(),
             game_direction: GameDirection::Clockwise,
             current_player: rand::random_range(0..player_number),
             player_number,
@@ -603,14 +608,16 @@ impl<G: GameSessionState + std::fmt::Debug> Display for GameSession<G> {
 #[derive(Debug)]
 pub struct Hand {
     player_id: Uuid,
+    nick: String,
     held_cards: Vec<CardReference>,
 }
 
 impl Hand {
-    pub fn new(id: Uuid) -> Self {
+    pub fn new(id: Uuid, nick: String) -> Self {
         Hand {
             held_cards: vec![],
             player_id: id,
+            nick,
         }
     }
 
@@ -618,20 +625,18 @@ impl Hand {
         &self.player_id
     }
 
+    pub fn get_nick(&self) -> &str {
+        &self.nick
+    }
+
     pub fn get_held_cards(&self) -> &Vec<CardReference> {
         &self.held_cards
     }
 }
 
-impl From<Uuid> for Hand {
-    fn from(value: Uuid) -> Self {
-        Hand::new(value)
-    }
-}
-
 impl Default for Hand {
     fn default() -> Self {
-        Self::new(Uuid::new_v4())
+        Self::new(Uuid::new_v4(), String::new())
     }
 }
 
@@ -655,6 +660,7 @@ pub struct GameView {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PlayerView {
     pub id: Uuid,
+    pub nick: String,
     pub card_count: usize,
 }
 
@@ -725,8 +731,10 @@ mod tests {
         let stack = stack.iter().map(&mut take).collect();
         let players: Vec<Hand> = hands
             .iter()
-            .map(|hand| Hand {
+            .enumerate()
+            .map(|(i, hand)| Hand {
                 player_id: Uuid::new_v4(),
+                nick: format!("player{i}"),
                 held_cards: hand.iter().map(&mut take).collect(),
             })
             .collect();
@@ -818,17 +826,24 @@ mod tests {
             .collect()
     }
 
+    /// `n` players with random ids, named player0, player1, ...
+    fn seats(n: usize) -> Vec<(Uuid, String)> {
+        (0..n)
+            .map(|i| (Uuid::new_v4(), format!("player{i}")))
+            .collect()
+    }
+
     #[test]
     fn game_id_is_creator_id() {
-        let ids: Vec<Uuid> = (0..3).map(|_| Uuid::new_v4()).collect();
-        let game = Game::new(ids.clone()).unwrap();
-        assert_eq!(game.get_game_id(), &ids[0]);
-        assert_eq!(game.get_creator_id(), &ids[0]);
+        let seats = seats(3);
+        let game = Game::new(seats.clone()).unwrap();
+        assert_eq!(game.get_game_id(), &seats[0].0);
+        assert_eq!(game.get_creator_id(), &seats[0].0);
     }
 
     #[test]
     fn game_reports_session_state() {
-        let game = Game::new(vec![Uuid::new_v4(), Uuid::new_v4()]).unwrap();
+        let game = Game::new(seats(2)).unwrap();
         assert_eq!(game.get_game_session_state(), "Setup");
         let Game::Setup(setup) = game else {
             unreachable!()
@@ -841,9 +856,9 @@ mod tests {
 
     #[test]
     fn moves_need_a_running_game() {
-        let ids = vec![Uuid::new_v4(), Uuid::new_v4()];
-        let game = Game::new(ids.clone()).unwrap();
-        let (game, result) = game.draw(ids[0]);
+        let seats = seats(2);
+        let game = Game::new(seats.clone()).unwrap();
+        let (game, result) = game.draw(seats[0].0);
         assert_eq!(result, Err(MoveError::GameNotRunning));
         assert_eq!(game.get_game_session_state(), "Setup");
     }
@@ -1163,8 +1178,7 @@ mod tests {
     fn the_first_player_is_random() {
         let first: HashSet<usize> = (0..50)
             .map(|_| {
-                let ids = (0..4).map(|_| Uuid::new_v4()).collect();
-                GameSession::<GameSetup>::new(ids)
+                GameSession::<GameSetup>::new(seats(4))
                     .unwrap()
                     .session_state
                     .current_player
@@ -1188,12 +1202,12 @@ mod tests {
         let alices = game.view(alice).unwrap();
         let alice_cards: Vec<CardTypes> = alices.hand.iter().map(|h| h.card).collect();
         assert_eq!(alice_cards, vec![c(Red, One), c(Blue, Two)]);
-        let counts: Vec<(Uuid, usize)> = alices
+        let players: Vec<(Uuid, &str, usize)> = alices
             .players
             .iter()
-            .map(|p| (p.id, p.card_count))
+            .map(|p| (p.id, p.nick.as_str(), p.card_count))
             .collect();
-        assert_eq!(counts, vec![(alice, 2), (bob, 3)]);
+        assert_eq!(players, vec![(alice, "player0", 2), (bob, "player1", 3)]);
         let turn = alices.turn.unwrap();
         assert_eq!((turn.current_player, turn.color), (alice, Red));
         assert_eq!(turn.playable, vec![alices.hand[0].id]);

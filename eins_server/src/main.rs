@@ -487,7 +487,12 @@ async fn start_game(
             Cow::from("Game setup is not ready to start yet"),
         ));
     }
-    let game = Game::new(game_setup.players.iter().map(|p| p.id).collect())
+    let seats = game_setup
+        .players
+        .iter()
+        .map(|p| (p.id, p.nick.clone()))
+        .collect();
+    let game = Game::new(seats)
         .map_err(|e| (StatusCode::BAD_REQUEST, Cow::from(format!("Error: {e}"))))?
         .start();
     let game_setup = setups.remove(&game_id).expect("checked above");
@@ -904,7 +909,10 @@ mod tests {
         assert_eq!(alices["state"], "Play");
         assert_eq!(
             alices["players"],
-            json!([{ "id": alice_id, "card_count": 7 }, { "id": bob_id, "card_count": 7 }])
+            json!([
+                { "id": alice_id, "nick": "alice", "card_count": 7 },
+                { "id": bob_id, "nick": "bob", "card_count": 7 }
+            ])
         );
         let (alice_cards, bob_cards) = (card_ids(&alices), card_ids(&bobs));
         assert_eq!((alice_cards.len(), bob_cards.len()), (7, 7));

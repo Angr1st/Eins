@@ -6,6 +6,7 @@ use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 use ratatui::Frame;
+use uuid::Uuid;
 
 use crate::app::{Action, App, PromptKind, Screen};
 
@@ -328,11 +329,16 @@ fn draw_game(
     clicks: &mut Clicks,
 ) {
     let me = app.my_id();
+    let my_nick = app.me.as_ref().map(|p| p.get_nick()).unwrap_or_default();
+    // Nicks come with the game view; everyone named in it is a player of this game.
+    let nick = |id: &Uuid| {
+        view.players
+            .iter()
+            .find(|p| p.id == *id)
+            .map_or("?", |p| p.nick.as_str())
+    };
     let block = Block::bordered()
-        .title(format!(
-            " Eins · {} ",
-            me.map(|id| app.nick(&id)).unwrap_or_default()
-        ))
+        .title(format!(" Eins · {my_nick} "))
         .border_type(BorderType::Rounded);
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -355,7 +361,7 @@ fn draw_game(
     })];
     for player in &view.players {
         let is_current = Some(player.id) == current;
-        let mut name = app.nick(&player.id);
+        let mut name = player.nick.clone();
         if Some(player.id) == me {
             name.push_str(" (you)");
         }
@@ -411,14 +417,14 @@ fn draw_game(
         info.push(if my_turn {
             Line::from("Your turn!").green().bold()
         } else {
-            Line::from(format!("Waiting for {}…", app.nick(&turn.current_player))).dark_gray()
+            Line::from(format!("Waiting for {}…", nick(&turn.current_player))).dark_gray()
         });
     }
     if let Some(winner) = view.winner {
         let text = if Some(winner) == me {
             "You win!".to_string()
         } else {
-            format!("{} wins!", app.nick(&winner))
+            format!("{} wins!", nick(&winner))
         };
         info.push(Line::from(text).green().bold());
     }
