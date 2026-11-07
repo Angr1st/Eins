@@ -1,6 +1,7 @@
 use axum::extract::{FromRequestParts, State};
 use axum::http::request::Parts;
 use axum::http::StatusCode;
+use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::post;
 use axum::Json;
 use axum::{response::IntoResponse, routing::get, Router};
@@ -10,8 +11,11 @@ use eins_lib::infrastructure::Player;
 use serde::Serialize;
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::{Stream, StreamExt};
 use tracing_subscriber::FmtSubscriber;
 use uuid::Uuid;
 
@@ -20,6 +24,7 @@ struct App {
     players: Arc<RwLock<HashMap<Uuid, Player>>>,
     setups: Arc<RwLock<HashMap<Uuid, GameSetup>>>,
     games: Arc<RwLock<HashMap<Uuid, Game>>>,
+    events: broadcast::Sender<ServerEvent>,
 }
 
 impl App {
@@ -28,7 +33,14 @@ impl App {
             players: Arc::new(RwLock::new(HashMap::new())),
             setups: Arc::new(RwLock::new(HashMap::new())),
             games: Arc::new(RwLock::new(HashMap::new())),
+            events: broadcast::channel(64).0,
         }
+    }
+
+    /// Tells every connected client that something changed.
+    fn notify(&self, event: ServerEvent) {
+        // Sending only fails when no client is listening.
+        let _ = self.events.send(event);
     }
 
     async fn update_player(&self, player_id: Uuid, update: impl FnOnce(&mut Player)) {
@@ -196,6 +208,7 @@ fn app(state: App) -> Router {
         .route("/game/play", post(play_card))
         .route("/game/draw", post(draw_card))
         .route("/game/leave", post(leave_game))
+        .route("/events", get(events))
         .route("/health", get(get_app_health))
         .with_state(state)
 }
@@ -234,6 +247,7 @@ async fn register(
     let player = Player::new(registration.nick);
     let id = player.get_id();
     write_lock.insert(id, player.clone());
+    state.notify(ServerEvent::Lobby);
     let response = RegistrationResponse { player };
     Ok((StatusCode::CREATED, Json(response)))
 }
@@ -302,6 +316,7 @@ async fn setup_game(
     state
         .update_player(player_id, Player::create_game_setup)
         .await;
+    state.notify(ServerEvent::Lobby);
 
     Ok((
         StatusCode::CREATED,
@@ -329,6 +344,7 @@ async fn update_code(
     state
         .update_player(player_id, Player::update_game_setup)
         .await;
+    state.notify(ServerEvent::Lobby);
     Ok((StatusCode::OK, Json(SetupResponse { game_id: player_id })))
 }
 
@@ -363,6 +379,7 @@ async fn join_setup(
         state
             .update_player(player.get_id(), |p| p.join_game_setup(game_id))
             .await;
+        state.notify(ServerEvent::Lobby);
     }
     Ok((
         StatusCode::OK,
@@ -397,6 +414,7 @@ async fn leave_setup(
             state.update_player(member.id, Player::leave).await;
         }
         setups.remove(&game_id);
+        state.notify(ServerEvent::Lobby);
         return Ok(StatusCode::OK);
     }
     if !game_setup.remove_player(player_id) {
@@ -406,6 +424,7 @@ async fn leave_setup(
         ));
     }
     state.update_player(player_id, Player::leave).await;
+    state.notify(ServerEvent::Lobby);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -482,6 +501,8 @@ async fn start_game(
                 .await;
         }
     }
+    state.notify(ServerEvent::Lobby);
+    state.notify(ServerEvent::Game { game_id });
     Ok((StatusCode::OK, Json(GameStateResponse { game_id })))
 }
 
@@ -526,6 +547,7 @@ async fn apply_move(
     let view = game.view(player.get_id());
     games.insert(game_id, game);
     result.map_err(move_error)?;
+    state.notify(ServerEvent::Game { game_id });
     Ok(Json(view.expect("the player is part of the game")))
 }
 
@@ -599,7 +621,23 @@ async fn leave_game(
     if !anyone_left {
         games.remove(&game_id);
     }
+    state.notify(ServerEvent::Game { game_id });
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Server-sent events: one `ServerEvent` as JSON data per change.
+async fn events(
+    State(state): State<App>,
+    AuthPlayer(_): AuthPlayer,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let stream = BroadcastStream::new(state.events.subscribe()).map(|received| {
+        // A client that falls too far behind has missed events and must refresh everything.
+        let event = received.unwrap_or(ServerEvent::Resync);
+        Ok(Event::default()
+            .json_data(event)
+            .expect("server events serialize"))
+    });
+    Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
 async fn get_players(State(state): State<App>) -> impl IntoResponse {
@@ -1003,5 +1041,73 @@ mod tests {
             c.call("POST", "/game/setup", Some(&alice), None).await.0,
             StatusCode::CREATED
         );
+    }
+
+    /// Reads the next pushed `ServerEvent`, or `None` if nothing arrives within `wait`.
+    async fn next_event(body: &mut Body, wait: std::time::Duration) -> Option<Value> {
+        use http_body_util::BodyExt;
+        loop {
+            let frame = tokio::time::timeout(wait, body.frame())
+                .await
+                .ok()??
+                .unwrap();
+            let Ok(data) = frame.into_data() else {
+                continue;
+            };
+            let text = String::from_utf8(data.to_vec()).unwrap();
+            if let Some(json) = text.lines().find_map(|line| line.strip_prefix("data: ")) {
+                return Some(serde_json::from_str(json).unwrap());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn changes_are_pushed_to_connected_clients() {
+        use std::time::Duration;
+        let c = Client::new();
+        let request = |code: Option<&str>| {
+            let mut builder = Request::builder().uri("/events");
+            if let Some(code) = code {
+                builder = builder.header("code", code);
+            }
+            builder.body(Body::empty()).unwrap()
+        };
+        let anonymous = c.app.clone().oneshot(request(None)).await.unwrap();
+        assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+
+        let (alice_id, alice) = c.register("alice").await;
+        let response = c.app.clone().oneshot(request(Some(&alice))).await.unwrap();
+        assert_eq!(response.headers()["content-type"], "text/event-stream");
+        let mut events = response.into_body();
+        let wait = Duration::from_secs(2);
+
+        let (_, bob) = c.register("bob").await;
+        assert_eq!(next_event(&mut events, wait).await, Some(json!("Lobby")));
+        c.call("POST", "/game/setup", Some(&alice), None).await;
+        assert_eq!(next_event(&mut events, wait).await, Some(json!("Lobby")));
+        c.join(&bob, &alice_id, None).await;
+        assert_eq!(next_event(&mut events, wait).await, Some(json!("Lobby")));
+
+        c.call("POST", "/game/setup/start", Some(&alice), None)
+            .await;
+        let game = json!({ "Game": { "game_id": alice_id } });
+        assert_eq!(next_event(&mut events, wait).await, Some(json!("Lobby")));
+        assert_eq!(next_event(&mut events, wait).await, Some(game.clone()));
+
+        // A rejected move changes nothing, so nothing is pushed; an accepted one is.
+        let (_, view) = c.call("GET", "/game/me", Some(&alice), None).await;
+        let (current, waiting) = if view["turn"]["current_player"] == json!(alice_id) {
+            (&alice, &bob)
+        } else {
+            (&bob, &alice)
+        };
+        let (status, _) = c.call("POST", "/game/draw", Some(waiting), None).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(
+            next_event(&mut events, Duration::from_millis(200)).await,
+            None
+        );
+        c.call("POST", "/game/draw", Some(current), None).await;
+        assert_eq!(next_event(&mut events, wait).await, Some(game));
     }
 }

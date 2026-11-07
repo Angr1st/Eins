@@ -145,3 +145,15 @@ impl From<&Player> for PlayerResponse {
         }
     }
 }
+
+/// Pushed over `GET /events` whenever server state changes. An event only says what changed;
+/// clients fetch the details through the regular endpoints, so nothing private is pushed.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum ServerEvent {
+    /// Players, game setups or waiting rooms changed.
+    Lobby,
+    /// The game with this id changed.
+    Game { game_id: Uuid },
+    /// Events were dropped for this client; it should refresh everything.
+    Resync,
+}
