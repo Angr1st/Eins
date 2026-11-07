@@ -59,6 +59,8 @@ pub struct GameSetupsResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameSetupResponse {
     pub id: Uuid,
+    /// Nick of the player who created the setup and can start the game.
+    pub host_nick: String,
     pub number_of_players: usize,
     pub state: GameSetupState,
 }

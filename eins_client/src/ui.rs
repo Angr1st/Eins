@@ -153,7 +153,7 @@ fn draw_lobby(
             GameSetupState::Full => ("full", Style::new().red()),
         };
         let line = Line::from(vec![
-            Span::raw(format!(" {:<16}", app.nick(&setup.id))),
+            Span::raw(format!(" {:<16}", setup.host_nick)),
             Span::raw(format!(
                 "{:>2} player{}   ",
                 setup.number_of_players,

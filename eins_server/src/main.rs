@@ -172,6 +172,13 @@ impl From<&GameSetup> for GameSetupResponse {
     fn from(value: &GameSetup) -> Self {
         Self {
             id: value.creator,
+            host_nick: value
+                .players
+                .iter()
+                .find(|p| p.id == value.creator)
+                .expect("the creator stays in their setup until it is closed")
+                .nick
+                .clone(),
             number_of_players: value.players.len(),
             state: value.state,
         }
@@ -840,6 +847,11 @@ mod tests {
         let (_, bob) = c.register("bob").await;
         c.call("POST", "/game/setup", Some(&alice), None).await;
         c.join(&bob, &alice_id, None).await;
+        let (_, setups) = c.call("GET", "/game/setup", None, None).await;
+        assert_eq!(
+            setups["setups"],
+            json!([{ "id": alice_id, "host_nick": "alice", "number_of_players": 2, "state": "Open" }])
+        );
 
         let (status, body) = c
             .call("POST", "/game/setup/start", Some(&alice), None)

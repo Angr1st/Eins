@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -63,7 +62,6 @@ pub enum Action {
 pub struct App {
     api: Api,
     pub me: Option<Player>,
-    pub nicks: HashMap<Uuid, String>,
     pub screen: Screen,
     pub prompt: Option<Prompt>,
     pub status: String,
@@ -78,7 +76,6 @@ impl App {
         Self {
             api,
             me: None,
-            nicks: HashMap::new(),
             screen: Screen::Register {
                 nick: String::new(),
             },
@@ -88,13 +85,6 @@ impl App {
             clickables: vec![],
             notices,
         }
-    }
-
-    pub fn nick(&self, id: &Uuid) -> String {
-        self.nicks
-            .get(id)
-            .cloned()
-            .unwrap_or_else(|| id.to_string()[..8].to_string())
     }
 
     pub fn my_id(&self) -> Option<Uuid> {
@@ -414,12 +404,6 @@ impl App {
         self.refresh();
     }
 
-    fn load_nicks(&mut self) {
-        if let Ok(players) = self.api.players() {
-            self.nicks = players.into_iter().map(|p| (p.id, p.nick)).collect();
-        }
-    }
-
     /// Reacts to the server's event stream by refreshing what the current screen shows.
     pub fn on_notice(&mut self, notice: Notice) {
         let refresh = match notice {
@@ -452,7 +436,6 @@ impl App {
         match &self.screen {
             Screen::Register { .. } => {}
             Screen::Lobby { .. } => {
-                self.load_nicks();
                 let result = self.api.setups();
                 if let (Some(new_setups), Screen::Lobby { setups, selected }) =
                     (self.fetched(result), &mut self.screen)

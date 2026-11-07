@@ -4,8 +4,7 @@ use std::time::Duration;
 
 use eins_lib::api::{
     GameSetupResponse, GameSetupStateResponse, GameSetupsResponse, JoinRequest, JoinResponse,
-    MeResponse, PlayRequest, PlayerResponse, PlayersResponse, Registration, RegistrationResponse,
-    ServerEvent, Setup,
+    MeResponse, PlayRequest, Registration, RegistrationResponse, ServerEvent, Setup,
 };
 use eins_lib::cards::{CardReference, Color};
 use eins_lib::game::GameView;
@@ -85,11 +84,6 @@ impl Api {
     pub fn me(&self) -> Result<Player, String> {
         let response: MeResponse = Self::json(self.request(Method::GET, "/player/me"))?;
         Ok(response.player)
-    }
-
-    pub fn players(&self) -> Result<Vec<PlayerResponse>, String> {
-        let response: PlayersResponse = Self::json(self.request(Method::GET, "/player"))?;
-        Ok(response.players)
     }
 
     pub fn setups(&self) -> Result<Vec<GameSetupResponse>, String> {
