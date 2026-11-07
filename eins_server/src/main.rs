@@ -83,7 +83,7 @@ impl GameSetup {
     fn new(player: &Player) -> Self {
         let player_id = player.get_id();
         Self {
-            creator: player_id.clone(),
+            creator: player_id,
             players: vec![GameSetupPlayer {
                 id: player_id,
                 nick: player.get_nick().to_string(),
@@ -98,7 +98,7 @@ impl GameSetup {
         self.is_ready = self.players.len() > 1;
     }
 
-    fn join<'a>(&mut self, player: &Player, code: Option<&'a str>) -> JoinGameSetupResult {
+    fn join(&mut self, player: &Player, code: Option<&str>) -> JoinGameSetupResult {
         if self.has_correct_code(code) {
             let result = self.add_player(player);
             self.set_is_ready();
@@ -107,14 +107,14 @@ impl GameSetup {
         JoinGameSetupResult::WrongCode
     }
 
-    fn has_correct_code<'a>(&self, code: Option<&'a str>) -> bool {
+    fn has_correct_code(&self, code: Option<&str>) -> bool {
         if let Some(current_code) = &self.code {
             if let Some(check_code) = code {
                 return current_code == check_code;
             }
-            return false;
+            false
         } else {
-            return code.is_none();
+            code.is_none()
         }
     }
 
@@ -172,7 +172,7 @@ impl GameSetup {
             }
         }
         self.set_is_ready();
-        return true;
+        true
     }
 }
 
@@ -234,7 +234,7 @@ struct GameSetupResponse {
 impl From<&GameSetup> for GameSetupResponse {
     fn from(value: &GameSetup) -> Self {
         Self {
-            id: value.creator.clone(),
+            id: value.creator,
             number_of_players: value.players.len(),
             state: value.state,
         }
@@ -610,7 +610,7 @@ async fn start_game(
 
 async fn get_players(State(state): State<App>) -> impl IntoResponse {
     let read_lock = state.players.read_owned().await;
-    let players: Vec<PlayerResponse> = read_lock.iter().map(|(_, value)| value.into()).collect();
+    let players: Vec<PlayerResponse> = read_lock.values().map(|value| value.into()).collect();
     let count = players.len();
     if count == 0 {
         tracing::info!("No players registered");
@@ -625,7 +625,7 @@ async fn get_players(State(state): State<App>) -> impl IntoResponse {
 
 async fn get_game_setups(State(state): State<App>) -> impl IntoResponse {
     let read_lock = state.setups.read_owned().await;
-    let setups: Vec<GameSetupResponse> = read_lock.iter().map(|(_, value)| value.into()).collect();
+    let setups: Vec<GameSetupResponse> = read_lock.values().map(|value| value.into()).collect();
     let count = setups.len();
     tracing::info!("Currently {count} number of game setups");
     let response = GameSetupsResponse { setups };
@@ -635,8 +635,8 @@ async fn get_game_setups(State(state): State<App>) -> impl IntoResponse {
 async fn get_games(State(state): State<App>) -> impl IntoResponse {
     let read_lock = state.games.read_owned().await;
     let games: Vec<GameResponse> = read_lock
-        .iter()
-        .map(|(_, game)| GameResponse {
+        .values()
+        .map(|game| GameResponse {
             id: *game.get_game_id(),
             number_of_players: game.get_number_of_players(),
             state: game.get_game_session_state().to_string(),

@@ -38,7 +38,7 @@ impl Player {
     }
 
     pub fn get_id(&self) -> Uuid {
-        self.id.clone()
+        self.id
     }
 
     pub fn get_nick(&self) -> &str {
@@ -50,25 +50,18 @@ impl Player {
     }
 
     pub fn is_free(&self) -> bool {
-        match self.state {
-            PlayerState::Free => true,
-            _ => false,
-        }
+        matches!(self.state, PlayerState::Free)
     }
 
     pub fn has_created_game_setup(&self) -> bool {
-        match self.state {
-            PlayerState::GameSetupCreated => true,
-            PlayerState::GameSetupUpdated => true,
-            _ => false,
-        }
+        matches!(
+            self.state,
+            PlayerState::GameSetupCreated | PlayerState::GameSetupUpdated
+        )
     }
 
     pub fn has_joined_game_setup(&self) -> bool {
-        match self.state {
-            PlayerState::GameSetupJoined(_) => true,
-            _ => false,
-        }
+        matches!(self.state, PlayerState::GameSetupJoined(_))
     }
 
     pub fn get_game_id(&self) -> Option<Uuid> {
