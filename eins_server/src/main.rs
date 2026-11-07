@@ -119,9 +119,6 @@ impl GameSetup {
     }
 
     fn update(&mut self, new_code: Option<String>) {
-        if self.state == GameSetupState::Started {
-            panic!("Game Setup has been started! Code cannot be changed now");
-        }
         if let Some(code) = new_code {
             if code.is_empty() || code.trim().is_empty() {
                 self.code = None;
@@ -136,14 +133,12 @@ impl GameSetup {
                 GameSetupState::Open => GameSetupState::Closed,
                 GameSetupState::Closed => GameSetupState::Closed,
                 GameSetupState::Full => GameSetupState::Full,
-                GameSetupState::Started => GameSetupState::Started,
             }
         } else {
             match self.state {
                 GameSetupState::Closed => GameSetupState::Open,
                 GameSetupState::Open => GameSetupState::Open,
                 GameSetupState::Full => GameSetupState::Full,
-                GameSetupState::Started => GameSetupState::Started,
             }
         };
         self.state = new_state;
@@ -165,7 +160,7 @@ impl GameSetup {
     }
 
     fn remove_player(&mut self, player: Uuid) -> bool {
-        if !self.players.iter().find(|gsp| gsp.id == player).is_none() {
+        if !self.players.iter().any(|gsp| gsp.id == player) {
             return false;
         }
         self.players.retain(|el| el.id != player);
@@ -186,7 +181,6 @@ enum GameSetupState {
     Open,
     Closed,
     Full,
-    Started,
 }
 
 impl Display for GameSetupState {
@@ -196,7 +190,6 @@ impl Display for GameSetupState {
             GameSetupState::Open => write!(f, "Open"),
             GameSetupState::Closed => write!(f, "Closed"),
             GameSetupState::Full => write!(f, "Full"),
-            GameSetupState::Started => write!(f, "Started"),
         }
     }
 }
@@ -316,20 +309,16 @@ async fn register(
         return Err((StatusCode::BAD_REQUEST, "Nick cannot be empty"));
     }
 
+    let mut write_lock = state.players.write().await;
+    if write_lock
+        .values()
+        .any(|p| p.get_nick() == registration.nick)
     {
-        let read_lock = state.players.read().await;
-        let existing_nick = read_lock
-            .values()
-            .any(|p| p.get_nick() == &registration.nick);
-        if existing_nick {
-            return Err((
-                StatusCode::CONFLICT,
-                "Nick already in use, please choose another!",
-            ));
-        }
+        return Err((
+            StatusCode::CONFLICT,
+            "Nick already in use, please choose another!",
+        ));
     }
-
-    let mut write_lock = state.players.write_owned().await;
     let player = Player::new(registration.nick);
     let id = player.get_id();
     write_lock.insert(id, player.clone());
@@ -412,9 +401,13 @@ async fn update_code(
     State(state): State<App>,
     AuthPlayer(player): AuthPlayer,
     setup_update: Option<Json<GameSetupUpdate>>,
-) -> (StatusCode, Json<SetupResponse>) {
+) -> Result<(StatusCode, Json<SetupResponse>), (StatusCode, &'static str)> {
     let player_id = player.get_id();
-    if let Some(setup) = state.setups.write().await.get_mut(&player_id) {
+    {
+        let mut setups = state.setups.write().await;
+        let setup = setups
+            .get_mut(&player_id)
+            .ok_or((StatusCode::NOT_FOUND, "Player has not created a game setup"))?;
         let game_code = setup_update.and_then(|update| update.0.game_code);
         if let Some(game_code) = game_code.as_deref() {
             tracing::info!("Updating code to {game_code}");
@@ -424,7 +417,7 @@ async fn update_code(
     state
         .update_player(player_id, Player::update_game_setup)
         .await;
-    (StatusCode::OK, Json(SetupResponse { game_id: player_id }))
+    Ok((StatusCode::OK, Json(SetupResponse { game_id: player_id })))
 }
 
 #[derive(Deserialize)]
@@ -460,15 +453,23 @@ async fn join_setup(
     AuthPlayer(player): AuthPlayer,
     Json(join_request): Json<JoinRequest>,
 ) -> Result<(StatusCode, Json<JoinResponse>), (StatusCode, &'static str)> {
+    if !player.is_free() {
+        return Err((
+            StatusCode::CONFLICT,
+            "Player is already in a game setup or game",
+        ));
+    }
     let game_id = join_request.game_id;
     let mut setups = state.setups.write().await;
     let setup = setups
         .get_mut(&game_id)
         .ok_or((StatusCode::NOT_FOUND, "Game setup not found"))?;
     let join_result = setup.join(&player, join_request.game_code.as_deref());
-    state
-        .update_player(player.get_id(), |p| p.join_game_setup(game_id))
-        .await;
+    if matches!(join_result, JoinGameSetupResult::Success) {
+        state
+            .update_player(player.get_id(), |p| p.join_game_setup(game_id))
+            .await;
+    }
     Ok((
         StatusCode::OK,
         Json(JoinResponse {
@@ -583,7 +584,7 @@ async fn start_game(
 
     let mut setups = state.setups.write().await;
     let game_setup = setups
-        .get_mut(&game_id)
+        .get(&game_id)
         .ok_or((StatusCode::NOT_FOUND, Cow::from("Game setup doesn't exist")))?;
     if !game_setup.is_ready {
         return Err((
@@ -593,8 +594,17 @@ async fn start_game(
     }
     let game = Game::new(game_setup.players.iter().map(|p| p.id).collect())
         .map_err(|e| (StatusCode::BAD_REQUEST, Cow::from(format!("Error: {e}"))))?;
-    state.games.write().await.insert(game_setup.creator, game);
-    game_setup.set_is_ready();
+    let game_setup = setups.remove(&game_id).expect("checked above");
+    state.games.write().await.insert(game_id, game);
+    for member in game_setup.players.iter() {
+        if member.id == game_setup.creator {
+            state.update_player(member.id, Player::start_game).await;
+        } else {
+            state
+                .update_player(member.id, |p| p.join_game(game_id))
+                .await;
+        }
+    }
     Ok((StatusCode::OK, Json(GameStateResponse { game_id })))
 }
 
@@ -626,14 +636,206 @@ async fn get_games(State(state): State<App>) -> impl IntoResponse {
     let read_lock = state.games.read_owned().await;
     let games: Vec<GameResponse> = read_lock
         .iter()
-        .map(|(_, value)| GameResponse {
-            id: value.get_game_id().clone(),
-            number_of_players: 1,
-            state: String::from("Started"),
+        .map(|(_, game)| GameResponse {
+            id: *game.get_game_id(),
+            number_of_players: game.get_number_of_players(),
+            state: game.get_game_session_state().to_string(),
         })
         .collect();
     let count = games.len();
     tracing::info!("Currently {count} number of games");
     let response = GamesResponse { games };
     Json(response)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use serde_json::{json, Value};
+    use tower::ServiceExt;
+
+    struct Client {
+        app: Router,
+    }
+
+    impl Client {
+        fn new() -> Self {
+            Self {
+                app: app(App::new()),
+            }
+        }
+
+        async fn call(
+            &self,
+            method: &str,
+            uri: &str,
+            code: Option<&str>,
+            body: Option<Value>,
+        ) -> (StatusCode, Value) {
+            let mut request = Request::builder().method(method).uri(uri);
+            if let Some(code) = code {
+                request = request.header("code", code);
+            }
+            let request = match body {
+                Some(body) => request
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string())),
+                None => request.body(Body::empty()),
+            }
+            .unwrap();
+            let response = self.app.clone().oneshot(request).await.unwrap();
+            let status = response.status();
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let body = serde_json::from_slice(&bytes)
+                .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into()));
+            (status, body)
+        }
+
+        /// Registers a player and returns (id, code).
+        async fn register(&self, nick: &str) -> (String, String) {
+            let (status, body) = self
+                .call(
+                    "POST",
+                    "/player/register",
+                    None,
+                    Some(json!({ "nick": nick })),
+                )
+                .await;
+            assert_eq!(status, StatusCode::CREATED);
+            let code = body["player"]["code"].as_str().unwrap().to_string();
+            (code[..36].to_string(), code)
+        }
+
+        async fn state_of(&self, code: &str) -> Value {
+            self.call("GET", "/player/me", Some(code), None).await.1["player"]["state"].clone()
+        }
+
+        async fn join(
+            &self,
+            code: &str,
+            game_id: &str,
+            game_code: Option<&str>,
+        ) -> (StatusCode, Value) {
+            let body = json!({ "game_id": game_id, "game_code": game_code });
+            self.call("POST", "/game/setup/join", Some(code), Some(body))
+                .await
+        }
+
+        async fn setup_players(&self, game_id: &str, code: &str) -> Vec<String> {
+            let (_, body) = self.call("GET", "/game/setup/me", Some(code), None).await;
+            assert_eq!(body["id"], game_id);
+            body["players"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|p| p["nick"].as_str().unwrap().to_string())
+                .collect()
+        }
+    }
+
+    #[tokio::test]
+    async fn joined_player_can_leave_setup() {
+        let c = Client::new();
+        let (alice_id, alice) = c.register("alice").await;
+        let (_, bob) = c.register("bob").await;
+        c.call("POST", "/game/setup", Some(&alice), None).await;
+        c.join(&bob, &alice_id, None).await;
+
+        let (status, _) = c.call("POST", "/game/setup/leave", Some(&bob), None).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert_eq!(c.state_of(&bob).await, "Free");
+        assert_eq!(c.setup_players(&alice_id, &alice).await, vec!["alice"]);
+    }
+
+    #[tokio::test]
+    async fn join_only_succeeds_for_free_players_with_the_right_code() {
+        let c = Client::new();
+        let (alice_id, alice) = c.register("alice").await;
+        let (_, bob) = c.register("bob").await;
+        let (carol_id, carol) = c.register("carol").await;
+        let body = json!({ "game_code": "secret" });
+        c.call("POST", "/game/setup", Some(&alice), Some(body))
+            .await;
+
+        let (status, body) = c.join(&bob, &alice_id, Some("wrong")).await;
+        assert_eq!(
+            (status, &body["state"]),
+            (StatusCode::OK, &json!("Failure"))
+        );
+        assert_eq!(c.state_of(&bob).await, "Free");
+
+        assert_eq!(
+            c.join(&bob, &alice_id, Some("secret")).await.1["state"],
+            "Success"
+        );
+        assert_eq!(
+            c.join(&bob, &alice_id, Some("secret")).await.0,
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            c.join(&alice, &alice_id, Some("secret")).await.0,
+            StatusCode::CONFLICT
+        );
+
+        // A player who is in another setup cannot join as well.
+        c.call("POST", "/game/setup", Some(&carol), None).await;
+        assert_eq!(
+            c.join(&carol, &alice_id, Some("secret")).await.0,
+            StatusCode::CONFLICT
+        );
+        assert_eq!(c.state_of(&carol).await, "GameSetupCreated");
+        assert_eq!(c.setup_players(&carol_id, &carol).await, vec!["carol"]);
+
+        assert_eq!(
+            c.setup_players(&alice_id, &alice).await,
+            vec!["alice", "bob"]
+        );
+    }
+
+    #[tokio::test]
+    async fn starting_moves_the_setup_into_a_game() {
+        let c = Client::new();
+        let (alice_id, alice) = c.register("alice").await;
+        let (_, bob) = c.register("bob").await;
+        c.call("POST", "/game/setup", Some(&alice), None).await;
+        c.join(&bob, &alice_id, None).await;
+
+        let (status, body) = c
+            .call("POST", "/game/setup/start", Some(&alice), None)
+            .await;
+        assert_eq!(
+            (status, &body["game_id"]),
+            (StatusCode::OK, &json!(alice_id))
+        );
+        let (status, _) = c
+            .call("POST", "/game/setup/start", Some(&alice), None)
+            .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+
+        assert_eq!(c.state_of(&alice).await, "GameStarted");
+        assert_eq!(c.state_of(&bob).await, json!({ "GameJoined": alice_id }));
+        let (_, setups) = c.call("GET", "/game/setup", None, None).await;
+        assert_eq!(setups["setups"], json!([]));
+        let (_, games) = c.call("GET", "/game", None, None).await;
+        assert_eq!(
+            games["games"],
+            json!([{ "id": alice_id, "number_of_players": 2, "state": "Setup" }])
+        );
+    }
+
+    #[tokio::test]
+    async fn update_without_setup_is_rejected() {
+        let c = Client::new();
+        let (_, dave) = c.register("dave").await;
+        let body = json!({ "game_code": "x" });
+        let (status, _) = c
+            .call("POST", "/game/setup/update", Some(&dave), Some(body))
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(c.state_of(&dave).await, "Free");
+    }
 }

@@ -74,22 +74,25 @@ impl Game {
         Ok(Game::Setup(actual_session))
     }
 
-    pub fn get_game_id(&self) -> &Uuid {
+    fn session(&self) -> &ActualSession {
         match self {
-            Game::Setup(a) => &a.session_state.game_id,
-            Game::Play(b) => &b.session_state.game_id,
-            Game::Color(c) => &c.session_state.game_id,
-            Game::Finished(d) => &d.session_state.game_id,
+            Game::Setup(s) => &s.session_state,
+            Game::Play(p) => &p.session_state,
+            Game::Color(c) => &c.session_state,
+            Game::Finished(f) => &f.session_state,
         }
     }
 
+    pub fn get_game_id(&self) -> &Uuid {
+        &self.session().game_id
+    }
+
     pub fn get_creator_id(&self) -> &Uuid {
-        match self {
-            Game::Setup(s) => &s.session_state.creator_id,
-            Game::Play(p) => &p.session_state.creator_id,
-            Game::Color(c) => &c.session_state.creator_id,
-            Game::Finished(f) => &f.session_state.creator_id,
-        }
+        &self.session().creator_id
+    }
+
+    pub fn get_number_of_players(&self) -> usize {
+        self.session().player_number
     }
 
     pub fn get_game_session_state(&self) -> &str {
