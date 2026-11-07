@@ -10,7 +10,7 @@ pub fn get_card(card_ref: &CardReference) -> CardTypes {
     ALL_CARDS[index]
 }
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "usize")]
 pub struct CardReference(usize);
 
@@ -84,20 +84,15 @@ pub enum CardTypes {
 }
 
 impl CardTypes {
-    pub fn is_possible_next_card(
-        &self,
-        next_card: &CardTypes,
-        color_wish_opt: Option<Color>,
-    ) -> bool {
-        match (self, next_card, color_wish_opt) {
-            (CardTypes::Normal(current), CardTypes::Normal(next), None) => {
-                current.is_possible_next_card(next, None)
+    /// Whether this card may be played on `top` while `color` is the color in play:
+    /// the top card's color, or the color chosen with a wild card.
+    pub fn can_be_played_on(&self, top: &CardTypes, color: Color) -> bool {
+        match (self, top) {
+            (CardTypes::Wild(_), _) => true,
+            (CardTypes::Normal(card), CardTypes::Normal(top)) => {
+                card.color == color || card.symbol == top.symbol
             }
-            (CardTypes::Normal(_), CardTypes::Normal(next), Some(color)) => next.color == color,
-            (CardTypes::Normal(_), CardTypes::Wild(_), _) => true,
-            (CardTypes::Wild(_), CardTypes::Normal(_), None) => true,
-            (CardTypes::Wild(_), CardTypes::Normal(next), Some(color)) => next.color == color,
-            (CardTypes::Wild(_), CardTypes::Wild(_), _) => true,
+            (CardTypes::Normal(card), CardTypes::Wild(_)) => card.color == color,
         }
     }
 
@@ -109,78 +104,10 @@ impl CardTypes {
     }
 }
 
-#[derive(Debug)]
-pub enum CardAction {
-    Draw(DrawAction),
-    ColorChange(Color),
-    Regular,
-    ChangeGameDirection,
-    Skip,
-    DrawAndColorChange(DrawAction, Color),
-}
-
-impl CardAction {
-    fn is_possible_next_card(
-        &self,
-        current_card: &CardTypes,
-        next_card: &CardTypes,
-    ) -> Option<bool> {
-        match self {
-            CardAction::Skip => None,
-            CardAction::Draw(_) => None,
-            CardAction::ColorChange(color) => match next_card {
-                CardTypes::Normal(next_color_card) => Some(*color == next_color_card.color),
-                CardTypes::Wild(_) => Some(true),
-            },
-            CardAction::DrawAndColorChange(_, _) => None,
-            CardAction::Regular => Some(current_card.is_possible_next_card(next_card, None)),
-            CardAction::ChangeGameDirection => None,
-        }
-    }
-}
-
-impl Default for CardAction {
-    fn default() -> Self {
-        CardAction::Regular
-    }
-}
-
-#[derive(Debug)]
-pub enum DrawAction {
-    DrawOne,
-    DrawTwo,
-    DrawFour,
-}
-
-impl Default for DrawAction {
-    fn default() -> Self {
-        DrawAction::DrawOne
-    }
-}
-
-impl From<&DrawAction> for u8 {
-    fn from(value: &DrawAction) -> Self {
-        match value {
-            DrawAction::DrawOne => 1,
-            DrawAction::DrawTwo => 2,
-            DrawAction::DrawFour => 4,
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub struct ColorCard {
     pub color: Color,
     pub symbol: ColorSymbol,
-}
-
-impl ColorCard {
-    fn is_possible_next_card(&self, next_card: &ColorCard, color_wish_opt: Option<Color>) -> bool {
-        match color_wish_opt {
-            None => self.color == next_card.color || self.symbol == next_card.symbol,
-            Some(color) => next_card.color == color,
-        }
-    }
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -807,45 +734,62 @@ mod tests {
 
     #[test]
     fn same_color_possible_next_card() {
-        let color = Color::Green;
-        let first_card = CardTypes::Normal(ColorCard {
-            color,
+        let top = CardTypes::Normal(ColorCard {
+            color: Color::Green,
             symbol: ColorSymbol::Zero,
         });
-        let second_card = CardTypes::Normal(ColorCard {
-            color,
+        let card = CardTypes::Normal(ColorCard {
+            color: Color::Green,
             symbol: ColorSymbol::One,
         });
 
-        assert!(first_card.is_possible_next_card(&second_card, None));
+        assert!(card.can_be_played_on(&top, Color::Green));
     }
 
     #[test]
     fn different_color_different_symbol_impossible_next_card() {
-        let first_card = CardTypes::Normal(ColorCard {
+        let top = CardTypes::Normal(ColorCard {
             color: Color::Red,
             symbol: ColorSymbol::Zero,
         });
-        let second_card = CardTypes::Normal(ColorCard {
+        let card = CardTypes::Normal(ColorCard {
             color: Color::Blue,
             symbol: ColorSymbol::One,
         });
 
-        assert!(!first_card.is_possible_next_card(&second_card, None));
+        assert!(!card.can_be_played_on(&top, Color::Red));
     }
 
     #[test]
     fn different_color_same_symbol_possible_next_card() {
-        let symbol = ColorSymbol::Zero;
-        let first_card = CardTypes::Normal(ColorCard {
+        let top = CardTypes::Normal(ColorCard {
             color: Color::Red,
-            symbol,
+            symbol: ColorSymbol::Skip,
         });
-        let second_card = CardTypes::Normal(ColorCard {
+        let card = CardTypes::Normal(ColorCard {
             color: Color::Blue,
-            symbol,
+            symbol: ColorSymbol::Skip,
         });
 
-        assert!(first_card.is_possible_next_card(&second_card, None));
+        assert!(card.can_be_played_on(&top, Color::Red));
+    }
+
+    #[test]
+    fn only_the_chosen_color_follows_a_wild_card() {
+        let top = CardTypes::Wild(WildCard {
+            symbol: WildSymbol::ChooseColor,
+        });
+        let green = CardTypes::Normal(ColorCard {
+            color: Color::Green,
+            symbol: ColorSymbol::Two,
+        });
+        let red = CardTypes::Normal(ColorCard {
+            color: Color::Red,
+            symbol: ColorSymbol::Two,
+        });
+
+        assert!(green.can_be_played_on(&top, Color::Green));
+        assert!(!red.can_be_played_on(&top, Color::Green));
+        assert!(top.can_be_played_on(&top, Color::Green));
     }
 }
