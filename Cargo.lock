@@ -173,6 +173,7 @@ dependencies = [
  "jiff",
  "rand",
  "serde",
+ "serde_json",
  "uuid",
 ]
 

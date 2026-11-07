@@ -3,7 +3,7 @@ use std::fmt::Display;
 use uuid::Uuid;
 
 use crate::cards::{
-    self, create_deck, get_card, CardAction, CardReference, CardTypes, Color, DrawAction,
+    create_deck, get_card, CardAction, CardReference, CardTypes, Color, DrawAction,
 };
 
 pub const INITIAL_HAND_CARDS: usize = 7;
@@ -14,11 +14,11 @@ fn possible_next_card(
     hand: &Vec<CardReference>,
     color_constraint_opt: Option<Color>,
 ) -> GamePlay {
-    let actual_card = cards::retrieve_card(&current_card);
+    let actual_card = get_card(&current_card);
     let possible_cards: Vec<CardReference> = hand
         .into_iter()
         .filter(|next_card| {
-            let next_card_ref = cards::retrieve_card(next_card);
+            let next_card_ref = get_card(next_card);
             actual_card.is_possible_next_card(&next_card_ref, color_constraint_opt)
         })
         .cloned()
@@ -93,7 +93,12 @@ impl Game {
     }
 
     pub fn get_game_session_state(&self) -> &str {
-        self.get_game_session_state()
+        match self {
+            Game::Setup(s) => s.get_game_session_state(),
+            Game::Play(p) => p.get_game_session_state(),
+            Game::Color(c) => c.get_game_session_state(),
+            Game::Finished(f) => f.get_game_session_state(),
+        }
     }
 }
 
@@ -156,7 +161,7 @@ impl GameSession<GameSetup> {
 
         let starting_card = GameSession::find_starting_card(&mut deck);
 
-        let creator_id = players[0].clone();
+        let creator_id = players[0];
         let session = ActualSession {
             stack: vec![starting_card],
             deck,
@@ -164,7 +169,7 @@ impl GameSession<GameSetup> {
             game_direction: GameDirection::Clockwise,
             current_player: 0,
             player_number,
-            game_id: uuid::Uuid::new_v4(),
+            game_id: creator_id,
             creator_id,
         };
 
@@ -255,21 +260,11 @@ impl GameSession<FinishGame> {
 
 impl<G: GameSessionState> GameSession<G> {
     fn next_player(mut self: Self) -> Self {
-        match self.session_state.game_direction {
-            GameDirection::Clockwise => {
-                if self.session_state.current_player + 1 == self.session_state.player_number {
-                    self.session_state.current_player = 0;
-                } else {
-                    self.session_state.current_player = self.session_state.current_player + 1;
-                }
-            }
-            GameDirection::CounterClockwise => {
-                if self.session_state.current_player - 1 == 0 {
-                    self.session_state.current_player = self.session_state.player_number - 1;
-                } else {
-                    self.session_state.current_player = self.session_state.current_player - 1;
-                }
-            }
+        let session = &mut self.session_state;
+        let n = session.player_number;
+        session.current_player = match session.game_direction {
+            GameDirection::Clockwise => (session.current_player + 1) % n,
+            GameDirection::CounterClockwise => (session.current_player + n - 1) % n,
         };
 
         self
@@ -393,5 +388,54 @@ pub enum GameDirection {
 impl Default for GameDirection {
     fn default() -> Self {
         GameDirection::Clockwise
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn players(n: usize) -> Vec<Uuid> {
+        (0..n).map(|_| Uuid::new_v4()).collect()
+    }
+
+    #[test]
+    fn game_id_is_creator_id() {
+        let ids = players(3);
+        let game = Game::new(ids.clone()).unwrap();
+        assert_eq!(game.get_game_id(), &ids[0]);
+        assert_eq!(game.get_creator_id(), &ids[0]);
+    }
+
+    #[test]
+    fn game_reports_session_state() {
+        let game = Game::new(players(2)).unwrap();
+        assert_eq!(game.get_game_session_state(), "Setup");
+        let Game::Setup(setup) = game else {
+            unreachable!()
+        };
+        assert_eq!(
+            Game::Play(setup.start_game()).get_game_session_state(),
+            "Play"
+        );
+    }
+
+    #[test]
+    fn next_player_wraps_in_both_directions() {
+        let mut session = GameSession::<GameSetup>::new(players(3)).unwrap();
+        let mut order = vec![];
+        for _ in 0..4 {
+            session = session.next_player();
+            order.push(session.session_state.current_player);
+        }
+        assert_eq!(order, vec![1, 2, 0, 1]);
+
+        session.session_state.game_direction = GameDirection::CounterClockwise;
+        order.clear();
+        for _ in 0..4 {
+            session = session.next_player();
+            order.push(session.session_state.current_player);
+        }
+        assert_eq!(order, vec![0, 2, 1, 0]);
     }
 }

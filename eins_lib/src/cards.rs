@@ -11,11 +11,12 @@ pub fn get_card(card_ref: &CardReference) -> CardTypes {
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[serde(try_from = "usize")]
 pub struct CardReference(usize);
 
 impl CardReference {
     fn new(card_number: usize) -> Option<CardReference> {
-        if card_number > MAX_CARD_NUMBER {
+        if card_number >= MAX_CARD_NUMBER {
             None
         } else {
             Some(CardReference(card_number))
@@ -39,7 +40,8 @@ impl TryFrom<usize> for CardReference {
     fn try_from(value: usize) -> Result<Self, Self::Error> {
         let card_ref = CardReference::new(value);
         card_ref.ok_or(format!(
-            "Card Reference {value} outside of allowed range of 0 - {MAX_CARD_NUMBER}!"
+            "Card Reference {value} outside of allowed range of 0 - {}!",
+            MAX_CARD_NUMBER - 1
         ))
     }
 }
@@ -743,27 +745,12 @@ pub fn create_deck() -> Vec<CardReference> {
     result
 }
 
-pub fn retrieve_card(card_ref: &CardReference) -> CardTypes {
-    let input_card_index: usize = card_ref.into();
-    let card: &_ = unsafe { ALL_CARDS.get_unchecked(input_card_index) };
-    card.clone()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
     fn number_is_108() {
         assert_eq!(108, MAX_CARD_NUMBER);
-    }
-
-    #[test]
-    fn for_loop() {
-        let mut current = 0;
-        for _ in 0..4 {
-            current = current + 1;
-        }
-        assert_eq!(4, current);
     }
 
     #[test]
@@ -797,19 +784,25 @@ mod tests {
             None => return,
         }
 
-        let invalid_card_ref = CardReference::new(MAX_CARD_NUMBER + 1);
-        assert!(invalid_card_ref.is_none());
+        assert!(CardReference::new(MAX_CARD_NUMBER - 1).is_some());
+        assert!(CardReference::new(MAX_CARD_NUMBER).is_none());
     }
 
     #[test]
     fn card_reference_try_from_error() {
-        let outside_max_range = MAX_CARD_NUMBER + 1;
-        let card_ref_result: Result<CardReference, _> = outside_max_range.try_into();
-        assert!(card_ref_result.is_err());
+        let card_ref_result: Result<CardReference, _> = MAX_CARD_NUMBER.try_into();
         assert_eq!(
             card_ref_result.unwrap_err(),
-            "Card Reference 109 outside of allowed range of 0 - 108!"
+            "Card Reference 108 outside of allowed range of 0 - 107!"
         );
+    }
+
+    #[test]
+    fn card_reference_deserialize_is_validated() {
+        let last: CardReference = serde_json::from_str("107").unwrap();
+        assert_eq!(last.card_number(), 107);
+        assert!(serde_json::from_str::<CardReference>("108").is_err());
+        assert!(serde_json::from_str::<CardReference>("5000").is_err());
     }
 
     #[test]
