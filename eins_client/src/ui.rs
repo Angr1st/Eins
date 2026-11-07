@@ -499,3 +499,285 @@ fn draw_color_picker(frame: &mut Frame, area: Rect, clicks: &mut Clicks) {
         clicks.push((rect, Action::PickColor(*color)));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+
+    use crossterm::event::{KeyCode, KeyEvent};
+    use eins_lib::api::{GameSetupResponse, GameSetupStatePlayerResponse, GameSetupStateResponse};
+    use eins_lib::cards::{CardReference, ColorCard, WildCard, ALL_CARDS, MAX_CARD_NUMBER};
+    use eins_lib::game::{HandCard, PlayerView, TurnView};
+    use eins_lib::infrastructure::Player;
+    use ratatui::backend::TestBackend;
+    use ratatui::buffer::Buffer;
+    use ratatui::Terminal;
+
+    use super::*;
+    use crate::api::Api;
+
+    fn app(nick: &str) -> App {
+        // Nothing listens on port 9. These tests only use actions that stay offline.
+        let mut app = App::new(Api::new("http://127.0.0.1:9".into()), mpsc::channel().0);
+        app.me = Some(Player::new(nick.into()));
+        app
+    }
+
+    fn render(app: &mut App) -> Buffer {
+        let mut terminal = Terminal::new(TestBackend::new(100, 34)).unwrap();
+        terminal.draw(|frame| draw(frame, app)).unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    /// The screen as text, one line per terminal row.
+    fn lines(buffer: &Buffer) -> Vec<String> {
+        let area = buffer.area;
+        (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .map(|x| buffer[(x, y)].symbol().chars().next().unwrap_or(' '))
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// Where `text` is drawn on screen.
+    fn find(buffer: &Buffer, text: &str) -> Option<(u16, u16)> {
+        let needle: Vec<char> = text.chars().collect();
+        lines(buffer).iter().enumerate().find_map(|(y, line)| {
+            let line: Vec<char> = line.chars().collect();
+            let x = line.windows(needle.len()).position(|w| w == needle)?;
+            Some((x as u16, y as u16))
+        })
+    }
+
+    fn shows(buffer: &Buffer, text: &str) -> bool {
+        find(buffer, text).is_some()
+    }
+
+    fn click(app: &mut App, text: &str) {
+        let buffer = render(app);
+        let (x, y) = find(&buffer, text).unwrap_or_else(|| panic!("{text:?} is not on screen"));
+        app.on_click(x, y);
+    }
+
+    fn c(color: CardColor, symbol: ColorSymbol) -> CardTypes {
+        CardTypes::Normal(ColorCard { color, symbol })
+    }
+
+    const WILD: CardTypes = CardTypes::Wild(WildCard {
+        symbol: WildSymbol::ChooseColor,
+    });
+
+    /// A hand of the given cards, each with its own card id.
+    fn hand(cards: &[CardTypes]) -> Vec<HandCard> {
+        let mut used = [false; MAX_CARD_NUMBER];
+        cards
+            .iter()
+            .map(|card| {
+                let i = (0..MAX_CARD_NUMBER)
+                    .find(|&i| !used[i] && ALL_CARDS[i] == *card)
+                    .unwrap();
+                used[i] = true;
+                HandCard {
+                    id: CardReference::try_from(i).unwrap(),
+                    card: *card,
+                }
+            })
+            .collect()
+    }
+
+    /// Alice (the app's player) against bob, who holds 5 cards. `playable` indexes `cards`.
+    fn game(app: &App, cards: &[CardTypes], playable: &[usize], current: Option<&str>) -> GameView {
+        let alice = app.my_id().unwrap();
+        let bob = Uuid::new_v4();
+        let hand = hand(cards);
+        GameView {
+            game_id: alice,
+            state: "Play".into(),
+            players: vec![
+                PlayerView {
+                    id: alice,
+                    nick: "alice".into(),
+                    card_count: hand.len(),
+                },
+                PlayerView {
+                    id: bob,
+                    nick: "bob".into(),
+                    card_count: 5,
+                },
+            ],
+            turn: current.map(|nick| TurnView {
+                current_player: if nick == "alice" { alice } else { bob },
+                color: CardColor::Red,
+                pending_draw: 0,
+                playable: playable.iter().map(|&i| hand[i].id).collect(),
+            }),
+            winner: None,
+            hand,
+            top_card: c(CardColor::Red, ColorSymbol::Five),
+            direction: GameDirection::Clockwise,
+        }
+    }
+
+    fn show_game(app: &mut App, view: GameView) {
+        app.screen = Screen::Game {
+            view: Some(view),
+            selected: 0,
+            eins: false,
+            picking_color: None,
+        };
+    }
+
+    #[test]
+    fn the_table_shows_turn_counts_and_pending_stack() {
+        let mut app = app("alice");
+        let cards = [
+            c(CardColor::Red, ColorSymbol::One),
+            WILD,
+            c(CardColor::Blue, ColorSymbol::Two),
+        ];
+        let mut view = game(&app, &cards, &[0, 1], Some("alice"));
+        view.turn.as_mut().unwrap().pending_draw = 4;
+        show_game(&mut app, view);
+        let screen = render(&mut app);
+
+        assert!(shows(&screen, "▶ alice (you): 3"));
+        assert!(shows(&screen, "bob: 5"));
+        assert!(shows(&screen, "Color:"));
+        assert!(shows(&screen, "+4 pending"));
+        assert!(shows(&screen, "Your turn!"));
+        assert!(shows(&screen, "Your hand (3)"));
+    }
+
+    #[test]
+    fn other_players_are_named_with_their_nicks() {
+        let mut app = app("alice");
+        let cards = [c(CardColor::Red, ColorSymbol::One)];
+        let view = game(&app, &cards, &[], Some("bob"));
+        show_game(&mut app, view);
+        let screen = render(&mut app);
+        assert!(shows(&screen, "▶ bob: 5"));
+        assert!(shows(&screen, "Waiting for bob…"));
+
+        let mut view = game(&app, &cards, &[], None);
+        view.winner = Some(view.players[1].id);
+        show_game(&mut app, view);
+        assert!(shows(&render(&mut app), "bob wins!"));
+    }
+
+    #[test]
+    fn unplayable_cards_are_faded_on_your_turn_only() {
+        let red_one = c(CardColor::Red, ColorSymbol::One);
+        let red_two = c(CardColor::Red, ColorSymbol::Two);
+        let backgrounds = |current: &str| {
+            let mut app = app("alice");
+            let view = game(&app, &[red_one, red_two], &[0], Some(current));
+            show_game(&mut app, view);
+            let screen = render(&mut app);
+            // Both cards are red; only their playability differs.
+            let card_background = |index: usize| {
+                let (area, _) = app
+                    .clickables
+                    .iter()
+                    .find(|(_, action)| matches!(action, Action::PlayCard(i) if *i == index))
+                    .unwrap();
+                screen[(area.x + area.width / 2, area.y + area.height / 2)].bg
+            };
+            (card_background(0), card_background(1))
+        };
+
+        let (playable, unplayable) = backgrounds("alice");
+        assert_ne!(playable, unplayable);
+        let (first, second) = backgrounds("bob");
+        assert_eq!((first, second), (playable, playable));
+    }
+
+    #[test]
+    fn clicking_eins_and_a_wild_card() {
+        let mut app = app("alice");
+        let cards = [c(CardColor::Red, ColorSymbol::One), WILD];
+        let view = game(&app, &cards, &[0, 1], Some("alice"));
+        let wild_id = view.hand[1].id;
+        show_game(&mut app, view);
+
+        click(&mut app, "Eins! (e)");
+        assert!(matches!(app.screen, Screen::Game { eins: true, .. }));
+        assert!(shows(&render(&mut app), "EINS! ✓"));
+
+        click(&mut app, "★");
+        assert!(
+            matches!(app.screen, Screen::Game { picking_color: Some(id), .. } if id == wild_id)
+        );
+        let screen = render(&mut app);
+        assert!(shows(&screen, "Choose a color"));
+        assert!(shows(&screen, "4 Green"));
+
+        app.on_key(KeyEvent::from(KeyCode::Esc));
+        assert!(!shows(&render(&mut app), "Choose a color"));
+    }
+
+    #[test]
+    fn the_lobby_lists_games_by_host() {
+        let mut app = app("dave");
+        let setup = |host_nick: &str, number_of_players, state| GameSetupResponse {
+            id: Uuid::new_v4(),
+            host_nick: host_nick.into(),
+            number_of_players,
+            state,
+        };
+        app.screen = Screen::Lobby {
+            setups: vec![
+                setup("alice", 2, GameSetupState::Open),
+                setup("carol", 1, GameSetupState::Closed),
+            ],
+            selected: 0,
+        };
+        let screen = render(&mut app);
+        let lines = lines(&screen);
+        let row = |nick: &str| lines.iter().find(|l| l.contains(nick)).unwrap().clone();
+        assert!(row("alice").contains(" 2 players   open"));
+        assert!(row("carol").contains(" 1 player   needs code"));
+
+        // Joining a game that needs a code asks for it first.
+        click(&mut app, "carol");
+        assert!(shows(&render(&mut app), "This game needs a code"));
+    }
+
+    #[test]
+    fn only_the_host_can_start() {
+        let mut host = app("alice");
+        let host_id = host.my_id().unwrap();
+        let setup = || GameSetupStateResponse {
+            id: host_id,
+            players: vec![
+                GameSetupStatePlayerResponse {
+                    id: host_id,
+                    nick: "alice".into(),
+                },
+                GameSetupStatePlayerResponse {
+                    id: Uuid::new_v4(),
+                    nick: "bob".into(),
+                },
+            ],
+            is_ready: true,
+        };
+
+        host.me.as_mut().unwrap().create_game_setup();
+        host.screen = Screen::Waiting {
+            setup: Some(setup()),
+        };
+        let screen = render(&mut host);
+        assert!(shows(&screen, "alice (host)"));
+        assert!(shows(&screen, "Start (s)"));
+
+        let mut guest = app("bob");
+        guest.me.as_mut().unwrap().join_game_setup(host_id);
+        guest.screen = Screen::Waiting {
+            setup: Some(setup()),
+        };
+        let screen = render(&mut guest);
+        assert!(!shows(&screen, "Start (s)"));
+        assert!(shows(&screen, "Waiting for the host to start…"));
+    }
+}
