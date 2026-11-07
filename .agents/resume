@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Toolchains and Cargo downloads are restored from the orb snapshot.
+# Eins has no external database or authentication to reconnect on wake.
+# Keep dependency installation in setup, never in this latency-sensitive hook.

@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+TIMEFORMAT='Completed in %3R seconds'
+
+echo 'Checking native build prerequisites'
+missing=()
+for package in build-essential pkg-config cmake ca-certificates curl; do
+  if [[ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null || true)" != 'install ok installed' ]]; then
+    missing+=("$package")
+  fi
+done
+if ((${#missing[@]})); then
+  time sudo apt-get update -qq
+  time sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}"
+fi
+
+export PATH="$HOME/.local/bin:$PATH"
+if ! command -v mise >/dev/null; then
+  echo 'Installing mise'
+  time curl --fail --silent --show-error --location https://mise.run | MISE_INSTALL_PATH="$HOME/.local/bin/mise" sh
+fi
+
+echo 'Installing tools from mise.toml'
+mise trust "$repo_root/mise.toml"
+# Prefer upstream prebuilt cargo-edit binaries over compiling the CLI from scratch.
+time MISE_CARGO_BINSTALL_NATIVE=true mise install --yes
+
+# Amp and supervised services use non-interactive login shells, not .bashrc.
+# Export the full mise environment there without changing unrelated projects.
+profile_marker='# Eins orb toolchain'
+if ! grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
+  cat >> "$HOME/.bash_profile" <<EOF
+
+$profile_marker
+if [[ -z "\${EINS_ORB_ENV:-}" && ( "\$PWD" == "$repo_root" || "\$PWD" == "$repo_root/"* ) ]]; then
+  export PATH="\$HOME/.local/bin:\$PATH"
+  eval "\$(mise env --shell bash)"
+  # Do not export: a nested login shell resets PATH and must activate again.
+  EINS_ORB_ENV=1
+fi
+EOF
+fi
+
+echo 'Caching locked workspace dependencies'
+time mise exec -- cargo fetch --locked
