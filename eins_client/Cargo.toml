@@ -12,4 +12,5 @@ eins_lib = { version = "0.1.0", path = "../eins_lib" }
 ratatui = "0.30.2"
 reqwest = { version = "0.13.5", features = ["blocking", "json"] }
 serde.workspace = true
+serde_json = "1.0.154"
 uuid.workspace = true

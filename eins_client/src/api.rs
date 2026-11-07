@@ -1,9 +1,11 @@
+use std::io::{BufRead, BufReader};
+use std::sync::mpsc::Sender;
 use std::time::Duration;
 
 use eins_lib::api::{
     GameSetupResponse, GameSetupStateResponse, GameSetupsResponse, JoinRequest, JoinResponse,
     MeResponse, PlayRequest, PlayerResponse, PlayersResponse, Registration, RegistrationResponse,
-    Setup,
+    ServerEvent, Setup,
 };
 use eins_lib::cards::{CardReference, Color};
 use eins_lib::game::GameView;
@@ -12,6 +14,13 @@ use reqwest::blocking::{Client, RequestBuilder};
 use reqwest::Method;
 use serde::de::DeserializeOwned;
 use uuid::Uuid;
+
+/// What the event stream tells the UI thread.
+pub enum Notice {
+    Connected,
+    Disconnected,
+    Event(ServerEvent),
+}
 
 /// Blocking client for the Eins server. Errors are the server's message, ready to show.
 pub struct Api {
@@ -136,5 +145,46 @@ impl Api {
 
     pub fn leave_game(&self) -> Result<(), String> {
         Self::send(self.request(Method::POST, "/game/leave")).map(|_| ())
+    }
+
+    /// Listens to the server's event stream on a background thread and forwards it to
+    /// `notices`, reconnecting every second while the server is unreachable. Call after
+    /// registering. The thread ends when the receiver is dropped.
+    pub fn listen(&self, notices: Sender<Notice>) {
+        let url = format!("{}/events", self.base);
+        let code = self
+            .code
+            .clone()
+            .expect("listen is called after registering");
+        std::thread::spawn(move || {
+            // No timeout: the stream stays open for as long as the server runs.
+            let http = Client::builder()
+                .timeout(None)
+                .build()
+                .expect("the HTTP client can be built");
+            loop {
+                let response = http.get(&url).header("code", &code).send();
+                if let Ok(response) = response.and_then(|r| r.error_for_status()) {
+                    if notices.send(Notice::Connected).is_err() {
+                        return;
+                    }
+                    for line in BufReader::new(response).lines() {
+                        let Ok(line) = line else { break };
+                        let Some(data) = line.strip_prefix("data:") else {
+                            continue;
+                        };
+                        if let Ok(event) = serde_json::from_str(data.trim()) {
+                            if notices.send(Notice::Event(event)).is_err() {
+                                return;
+                            }
+                        }
+                    }
+                }
+                if notices.send(Notice::Disconnected).is_err() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_secs(1));
+            }
+        });
     }
 }

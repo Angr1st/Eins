@@ -1,17 +1,19 @@
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::sync::mpsc::Sender;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use eins_lib::api::{GameSetupResponse, GameSetupState, GameSetupStateResponse, JoinResponseState};
+use eins_lib::api::{
+    GameSetupResponse, GameSetupState, GameSetupStateResponse, JoinResponseState, ServerEvent,
+};
 use eins_lib::cards::{CardReference, CardTypes, Color};
 use eins_lib::game::GameView;
 use eins_lib::infrastructure::Player;
 use ratatui::layout::{Position, Rect};
 use uuid::Uuid;
 
-use crate::api::Api;
+use crate::api::{Api, Notice};
 
-const REFRESH_EVERY: Duration = Duration::from_secs(1);
+const OFFLINE: &str = "Lost the connection to the server, reconnecting…";
 
 pub enum Screen {
     Register {
@@ -68,11 +70,11 @@ pub struct App {
     pub quit: bool,
     /// Areas that react to a mouse click, collected while drawing.
     pub clickables: Vec<(Rect, Action)>,
-    last_refresh: Instant,
+    notices: Sender<Notice>,
 }
 
 impl App {
-    pub fn new(api: Api) -> Self {
+    pub fn new(api: Api, notices: Sender<Notice>) -> Self {
         Self {
             api,
             me: None,
@@ -84,7 +86,7 @@ impl App {
             status: String::new(),
             quit: false,
             clickables: vec![],
-            last_refresh: Instant::now(),
+            notices,
         }
     }
 
@@ -99,6 +101,12 @@ impl App {
         self.me.as_ref().map(Player::get_id)
     }
 
+    /// For background refreshes: shows an error but keeps the message of the last action.
+    fn fetched<T>(&mut self, result: Result<T, String>) -> Option<T> {
+        result.map_err(|error| self.status = error).ok()
+    }
+
+    /// For the player's own actions: shows an error, or clears the last message.
     fn report<T>(&mut self, result: Result<T, String>) -> Option<T> {
         match result {
             Ok(value) => {
@@ -340,6 +348,7 @@ impl App {
         let result = self.api.register(nick.trim().to_string());
         if let Some(player) = self.report(result) {
             self.me = Some(player);
+            self.api.listen(self.notices.clone());
             self.enter_lobby();
         }
     }
@@ -411,29 +420,49 @@ impl App {
         }
     }
 
-    /// Polls the server for changes other players made.
-    pub fn tick(&mut self) {
-        if self.last_refresh.elapsed() >= REFRESH_EVERY {
+    /// Reacts to the server's event stream by refreshing what the current screen shows.
+    pub fn on_notice(&mut self, notice: Notice) {
+        let refresh = match notice {
+            Notice::Connected => {
+                if self.status == OFFLINE {
+                    self.status.clear();
+                }
+                // Changes may have happened while the stream was down.
+                true
+            }
+            Notice::Disconnected => {
+                self.status = OFFLINE.into();
+                false
+            }
+            Notice::Event(ServerEvent::Resync) => true,
+            Notice::Event(ServerEvent::Lobby) => {
+                matches!(self.screen, Screen::Lobby { .. } | Screen::Waiting { .. })
+            }
+            Notice::Event(ServerEvent::Game { game_id }) => match &self.screen {
+                Screen::Game { view, .. } => view.as_ref().is_none_or(|v| v.game_id == game_id),
+                _ => false,
+            },
+        };
+        if refresh {
             self.refresh();
         }
     }
 
     fn refresh(&mut self) {
-        self.last_refresh = Instant::now();
         match &self.screen {
             Screen::Register { .. } => {}
             Screen::Lobby { .. } => {
                 self.load_nicks();
                 let result = self.api.setups();
                 if let (Some(new_setups), Screen::Lobby { setups, selected }) =
-                    (self.report(result), &mut self.screen)
+                    (self.fetched(result), &mut self.screen)
                 {
                     *selected = (*selected).min(new_setups.len().saturating_sub(1));
                     *setups = new_setups;
                 }
             }
             Screen::Waiting { .. } => {
-                let Some(me) = self.report(self.api.me()) else {
+                let Some(me) = self.fetched(self.api.me()) else {
                     return;
                 };
                 let in_game = me.is_in_game();
@@ -447,7 +476,7 @@ impl App {
                 } else {
                     let result = self.api.my_setup();
                     if let (Some(new_setup), Screen::Waiting { setup }) =
-                        (self.report(result), &mut self.screen)
+                        (self.fetched(result), &mut self.screen)
                     {
                         *setup = Some(new_setup);
                     }
