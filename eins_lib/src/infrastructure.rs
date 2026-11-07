@@ -1,10 +1,10 @@
 use jiff::Timestamp;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::game::Hand;
 
-#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PlayerState {
     Free,
     GameSetupCreated,
@@ -14,7 +14,7 @@ pub enum PlayerState {
     GameJoined(Uuid),
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Player {
     id: Uuid,
     nick: String,

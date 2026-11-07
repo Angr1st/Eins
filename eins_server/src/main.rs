@@ -4,13 +4,12 @@ use axum::http::StatusCode;
 use axum::routing::post;
 use axum::Json;
 use axum::{response::IntoResponse, routing::get, Router};
-use eins_lib::cards::{CardReference, Color};
+use eins_lib::api::*;
 use eins_lib::game::{Game, GameView, MoveError};
 use eins_lib::infrastructure::Player;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::fmt::Display;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing_subscriber::FmtSubscriber;
@@ -39,26 +38,6 @@ impl App {
             .expect("Player should always exist at this point!");
         update(player);
     }
-}
-
-#[derive(Deserialize)]
-struct Registration {
-    nick: String,
-}
-
-#[derive(Serialize)]
-struct RegistrationResponse {
-    player: Player,
-}
-
-#[derive(Serialize)]
-struct MeResponse {
-    player: Player,
-}
-
-#[derive(Deserialize)]
-struct Setup {
-    game_code: Option<String>,
 }
 
 struct GameSetup {
@@ -177,61 +156,6 @@ impl GameSetup {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Serialize)]
-enum GameSetupState {
-    Open,
-    Closed,
-    Full,
-}
-
-impl Display for GameSetupState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "game setup state: ")?;
-        match self {
-            GameSetupState::Open => write!(f, "Open"),
-            GameSetupState::Closed => write!(f, "Closed"),
-            GameSetupState::Full => write!(f, "Full"),
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct SetupResponse {
-    game_id: Uuid,
-}
-
-#[derive(Serialize)]
-struct PlayersResponse {
-    players: Vec<PlayerResponse>,
-}
-
-#[derive(Serialize)]
-struct PlayerResponse {
-    nick: String,
-    id: Uuid,
-}
-
-impl From<&Player> for PlayerResponse {
-    fn from(value: &Player) -> Self {
-        Self {
-            nick: value.get_nick().to_string(),
-            id: value.get_id(),
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct GameSetupsResponse {
-    setups: Vec<GameSetupResponse>,
-}
-
-#[derive(Serialize)]
-struct GameSetupResponse {
-    id: Uuid,
-    number_of_players: usize,
-    state: GameSetupState,
-}
-
 impl From<&GameSetup> for GameSetupResponse {
     fn from(value: &GameSetup) -> Self {
         Self {
@@ -240,23 +164,6 @@ impl From<&GameSetup> for GameSetupResponse {
             state: value.state,
         }
     }
-}
-
-#[derive(Deserialize)]
-struct GameSetupUpdate {
-    game_code: Option<String>,
-}
-
-#[derive(Serialize)]
-struct GamesResponse {
-    games: Vec<GameResponse>,
-}
-
-#[derive(Serialize)]
-struct GameResponse {
-    id: Uuid,
-    number_of_players: usize,
-    state: String,
 }
 
 #[tokio::main]
@@ -425,18 +332,6 @@ async fn update_code(
     Ok((StatusCode::OK, Json(SetupResponse { game_id: player_id })))
 }
 
-#[derive(Deserialize)]
-struct JoinRequest {
-    game_id: Uuid,
-    game_code: Option<String>,
-}
-
-#[derive(Serialize)]
-enum JoinResponseState {
-    Success,
-    Failure,
-}
-
 impl From<JoinGameSetupResult> for JoinResponseState {
     fn from(value: JoinGameSetupResult) -> Self {
         match value {
@@ -445,12 +340,6 @@ impl From<JoinGameSetupResult> for JoinResponseState {
             JoinGameSetupResult::SetupFull => JoinResponseState::Failure,
         }
     }
-}
-
-#[derive(Serialize)]
-struct JoinResponse {
-    game_id: Uuid,
-    state: JoinResponseState,
 }
 
 async fn join_setup(
@@ -520,19 +409,6 @@ async fn leave_setup(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Serialize)]
-struct GameSetupStateResponse {
-    id: Uuid,
-    players: Vec<GameSetupStatePlayerResponse>,
-    is_ready: bool,
-}
-
-#[derive(Serialize)]
-struct GameSetupStatePlayerResponse {
-    id: Uuid,
-    nick: String,
-}
-
 async fn get_game_setup(
     State(state): State<App>,
     AuthPlayer(player): AuthPlayer,
@@ -562,11 +438,6 @@ async fn get_game_setup(
         players,
         is_ready: game_setup.is_ready,
     }))
-}
-
-#[derive(Serialize)]
-struct GameStateResponse {
-    game_id: Uuid,
 }
 
 async fn start_game(
@@ -671,16 +542,6 @@ async fn get_my_game(
         .view(player.get_id())
         .ok_or((StatusCode::FORBIDDEN, MoveError::NotInGame.to_string()))?;
     Ok(Json(view))
-}
-
-#[derive(Deserialize)]
-struct PlayRequest {
-    card: CardReference,
-    /// Required for wild cards, not allowed for any other card.
-    color: Option<Color>,
-    /// The player's "Eins" call; leaving it out with one card left costs two cards.
-    #[serde(default)]
-    eins: bool,
 }
 
 async fn play_card(
