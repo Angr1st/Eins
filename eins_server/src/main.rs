@@ -1,17 +1,15 @@
-use axum::extract::State;
-use axum::handler::Handler;
-use axum::http::{HeaderMap, StatusCode};
+use axum::extract::{FromRequestParts, State};
+use axum::http::request::Parts;
+use axum::http::StatusCode;
 use axum::routing::post;
 use axum::Json;
 use axum::{response::IntoResponse, routing::get, Router};
-use eins_lib::cards;
-use eins_lib::game::{Game, GamePlay};
+use eins_lib::game::Game;
 use eins_lib::infrastructure::Player;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::fmt::{Display, Write};
-use std::ops::Deref;
+use std::fmt::Display;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing_subscriber::FmtSubscriber;
@@ -31,6 +29,14 @@ impl App {
             setups: Arc::new(RwLock::new(HashMap::new())),
             games: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    async fn update_player(&self, player_id: Uuid, update: impl FnOnce(&mut Player)) {
+        let mut players = self.players.write().await;
+        let player = players
+            .get_mut(&player_id)
+            .expect("Player should always exist at this point!");
+        update(player);
     }
 }
 
@@ -264,44 +270,29 @@ async fn main() {
     let subscriber = FmtSubscriber::new();
 
     tracing::subscriber::set_global_default(subscriber).unwrap();
-    let state = App::new();
-    let app = Router::new()
-        .route("/player", get(get_players).with_state(state.clone()))
-        .route("/player/me", get(get_me).with_state(state.clone()))
-        .route("/player/register", post(register).with_state(state.clone()))
-        .route(
-            "/game/setup",
-            get(get_game_setups).with_state(state.clone()),
-        )
-        .route(
-            "/game/setup/me",
-            get(get_game_setup).with_state(state.clone()),
-        )
-        .route("/game/setup", post(setup_game).with_state(state.clone()))
-        .route(
-            "/game/setup/update",
-            post(update_code).with_state(state.clone()),
-        )
-        .route(
-            "/game/setup/join",
-            post(join_setup).with_state(state.clone()),
-        )
-        .route(
-            "/game/setup/leave",
-            post(leave_setup).with_state(state.clone()),
-        )
-        .route(
-            "/game/setup/start",
-            post(start_game).with_state(state.clone()),
-        )
-        .route("/game", get(get_games).with_state(state))
-        .route("/health", get(get_app_health));
+    let app = app(App::new());
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
         .await
         .unwrap();
     println!("listening on {}", listener.local_addr().unwrap());
     axum::serve(listener, app).await.unwrap();
+}
+
+fn app(state: App) -> Router {
+    Router::new()
+        .route("/player", get(get_players))
+        .route("/player/me", get(get_me))
+        .route("/player/register", post(register))
+        .route("/game/setup", get(get_game_setups).post(setup_game))
+        .route("/game/setup/me", get(get_game_setup))
+        .route("/game/setup/update", post(update_code))
+        .route("/game/setup/join", post(join_setup))
+        .route("/game/setup/leave", post(leave_setup))
+        .route("/game/setup/start", post(start_game))
+        .route("/game", get(get_games))
+        .route("/health", get(get_app_health))
+        .with_state(state)
 }
 
 #[derive(Serialize)]
@@ -346,200 +337,94 @@ async fn register(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
-async fn get_me(
-    headers: HeaderMap,
-    State(state): State<App>,
-) -> Result<(StatusCode, Json<MeResponse>), impl IntoResponse> {
-    let header_code = headers.get("code");
-    if let Some(code) = header_code {
-        let code = code.to_str();
-        if code.is_err() {
-            return Err((StatusCode::BAD_REQUEST, "code is malformed"));
-        }
-        let code = code.unwrap();
-        let player_id = Player::get_id_from_code(code);
-        if player_id.is_none() {
-            return Err((StatusCode::BAD_REQUEST, "code is malformed!"));
-        }
-        let player_id = player_id.unwrap();
+/// A registered player, authenticated by the secret `code` request header.
+struct AuthPlayer(Player);
 
-        //Check if player exists with the same code
-        {
-            let read_lock = state.players.read().await;
-            let existing_user = read_lock.get(&player_id);
-            if let Some(user) = existing_user {
-                if user.get_code() != code {
-                    return Err((
-                        StatusCode::UNAUTHORIZED,
-                        "Code doesn't match the Players code.",
-                    ));
-                } else {
-                    return Ok((
-                        StatusCode::OK,
-                        Json(MeResponse {
-                            player: user.clone(),
-                        }),
-                    ));
-                }
-            } else {
-                return Err((StatusCode::NOT_FOUND, "Player with id not found!"));
-            }
+impl FromRequestParts<App> for AuthPlayer {
+    type Rejection = (StatusCode, &'static str);
+
+    async fn from_request_parts(parts: &mut Parts, state: &App) -> Result<Self, Self::Rejection> {
+        let code = parts
+            .headers
+            .get("code")
+            .ok_or((StatusCode::UNAUTHORIZED, "Unauthorized"))?
+            .to_str()
+            .map_err(|_| (StatusCode::BAD_REQUEST, "code is malformed"))?;
+        let player_id = Player::get_id_from_code(code)
+            .ok_or((StatusCode::BAD_REQUEST, "code is malformed!"))?;
+        let players = state.players.read().await;
+        let player = players
+            .get(&player_id)
+            .ok_or((StatusCode::NOT_FOUND, "Player with id not found!"))?;
+        if player.get_code() != code {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                "Code doesn't match the Players code.",
+            ));
         }
-    } else {
-        return Err((StatusCode::UNAUTHORIZED, "Unauthorized"));
+        Ok(AuthPlayer(player.clone()))
     }
+}
+
+async fn get_me(AuthPlayer(player): AuthPlayer) -> Json<MeResponse> {
+    Json(MeResponse { player })
 }
 
 async fn setup_game(
-    headers: HeaderMap,
     State(state): State<App>,
+    AuthPlayer(player): AuthPlayer,
     setup: Option<Json<Setup>>,
-) -> Result<(StatusCode, Json<SetupResponse>), impl IntoResponse> {
-    let header_code = headers.get("code");
-    if let Some(code) = header_code {
-        let code = code.to_str();
-        if code.is_err() {
-            return Err((StatusCode::BAD_REQUEST, "code is malformed"));
-        }
-        let code = code.unwrap();
-        let player_id = Player::get_id_from_code(code);
-        if player_id.is_none() {
-            return Err((StatusCode::BAD_REQUEST, "code is malformed!"));
-        }
-        let player_id = player_id.unwrap();
-        let player;
-        //Check if player exists with the same code
-        {
-            let read_lock = state.players.read().await;
-            let existing_user = read_lock.get(&player_id);
-            if let Some(user) = existing_user {
-                if user.get_code() != code {
-                    return Err((
-                        StatusCode::UNAUTHORIZED,
-                        "Code doesn't match the Players code.",
-                    ));
-                }
-                player = user.clone();
-            } else {
-                return Err((StatusCode::NOT_FOUND, "Player with id not found!"));
-            }
-        }
-        //Check for existing game_setups created by same user
-        {
-            let read_lock = state.setups.read().await;
-            let setup_option = read_lock.get(&player_id);
-            if setup_option.is_some() {
-                return Err((
-                    StatusCode::CONFLICT,
-                    "Player has already started another game setup!",
-                ));
-            }
-        }
-
-        //Check for existing games created by same user
-        {
-            let read_lock = state.games.read_owned().await;
-            let existing_games = read_lock
-                .iter()
-                .filter(|entry| entry.1.get_creator_id() == &player_id);
-            if existing_games.count() > 0 {
-                return Err((
-                    StatusCode::CONFLICT,
-                    "Player has already started another game!",
-                ));
-            }
-        }
-        //Start a new game setup
-        {
-            let mut game_setup = GameSetup::new(&player);
-            game_setup.update(setup.and_then(|opt| opt.0.game_code));
-            let mut write_lock = state.setups.write_owned().await;
-            write_lock.insert(player_id.clone(), game_setup);
-        }
-
-        //Update Player State
-        {
-            let mut write_lock = state.players.write_owned().await;
-            let player_option = write_lock.get_mut(&player_id);
-            if let Some(player) = player_option {
-                player.create_game_setup();
-            } else {
-                unreachable!("Player should always exist at this point!");
-            }
-        }
-
-        Ok((
-            StatusCode::CREATED,
-            Json(SetupResponse { game_id: player_id }),
-        ))
-    } else {
-        Err((StatusCode::UNAUTHORIZED, "Unauthorized"))
+) -> Result<(StatusCode, Json<SetupResponse>), (StatusCode, &'static str)> {
+    let player_id = player.get_id();
+    if state.setups.read().await.contains_key(&player_id) {
+        return Err((
+            StatusCode::CONFLICT,
+            "Player has already started another game setup!",
+        ));
     }
+    let has_game = state
+        .games
+        .read()
+        .await
+        .values()
+        .any(|game| game.get_creator_id() == &player_id);
+    if has_game {
+        return Err((
+            StatusCode::CONFLICT,
+            "Player has already started another game!",
+        ));
+    }
+
+    let mut game_setup = GameSetup::new(&player);
+    game_setup.update(setup.and_then(|opt| opt.0.game_code));
+    state.setups.write().await.insert(player_id, game_setup);
+    state
+        .update_player(player_id, Player::create_game_setup)
+        .await;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(SetupResponse { game_id: player_id }),
+    ))
 }
 
 async fn update_code(
-    headers: HeaderMap,
     State(state): State<App>,
+    AuthPlayer(player): AuthPlayer,
     setup_update: Option<Json<GameSetupUpdate>>,
-) -> Result<(StatusCode, Json<SetupResponse>), impl IntoResponse> {
-    let header_code = headers.get("code");
-    if let Some(code) = header_code {
-        let code = code.to_str();
-        if code.is_err() {
-            return Err((StatusCode::BAD_REQUEST, "code is malformed"));
+) -> (StatusCode, Json<SetupResponse>) {
+    let player_id = player.get_id();
+    if let Some(setup) = state.setups.write().await.get_mut(&player_id) {
+        let game_code = setup_update.and_then(|update| update.0.game_code);
+        if let Some(game_code) = game_code.as_deref() {
+            tracing::info!("Updating code to {game_code}");
         }
-        let code = code.unwrap();
-        let player_id = Player::get_id_from_code(code);
-        if player_id.is_none() {
-            return Err((StatusCode::BAD_REQUEST, "code is malformed!"));
-        }
-        let player_id = player_id.unwrap();
-
-        //Check if player exists with the same code
-        {
-            let read_lock = state.players.read().await;
-            let existing_user = read_lock.get(&player_id);
-            if let Some(user) = existing_user {
-                if user.get_code() != code {
-                    return Err((
-                        StatusCode::UNAUTHORIZED,
-                        "Code doesn't match the Players code.",
-                    ));
-                }
-            } else {
-                return Err((StatusCode::NOT_FOUND, "Player with id not found!"));
-            }
-        }
-        //Check for existing game_setup created by same user
-        {
-            let mut write_lock = state.setups.write_owned().await;
-            let setup_option = write_lock.get_mut(&player_id);
-            if let Some(setup) = setup_option {
-                if let Some(update) = setup_update {
-                    let mut game_code_option = update.0.game_code;
-                    if let Some(game_code) = game_code_option.as_deref() {
-                        tracing::info!("Updating code to {game_code}");
-                    }
-                    setup.update(game_code_option.take());
-                } else {
-                    setup.update(None);
-                }
-            }
-        }
-        //Update Player State
-        {
-            let mut write_lock = state.players.write_owned().await;
-            let player_option = write_lock.get_mut(&player_id);
-            if let Some(player) = player_option {
-                player.update_game_setup();
-            } else {
-                unreachable!("Player should always exist at this point!");
-            }
-        }
-        Ok((StatusCode::OK, Json(SetupResponse { game_id: player_id })))
-    } else {
-        Err((StatusCode::UNAUTHORIZED, "Unauthorized"))
+        setup.update(game_code);
     }
+    state
+        .update_player(player_id, Player::update_game_setup)
+        .await;
+    (StatusCode::OK, Json(SetupResponse { game_id: player_id }))
 }
 
 #[derive(Deserialize)]
@@ -570,172 +455,63 @@ struct JoinResponse {
     state: JoinResponseState,
 }
 
-impl From<&JoinResponse> for bool {
-    fn from(val: &JoinResponse) -> Self {
-        match val.state {
-            JoinResponseState::Success => true,
-            JoinResponseState::Failure => false,
-        }
-    }
-}
-
 async fn join_setup(
-    headers: HeaderMap,
     State(state): State<App>,
-    join_request: Json<JoinRequest>,
-) -> Result<(StatusCode, Json<JoinResponse>), impl IntoResponse> {
-    let join_request = join_request.0;
-    let header_code = headers.get("code");
-    if let Some(code) = header_code {
-        let code = code.to_str();
-        if code.is_err() {
-            return Err((StatusCode::BAD_REQUEST, "code is malformed"));
-        }
-        let code = code.unwrap();
-        let player_id = Player::get_id_from_code(code);
-        if player_id.is_none() {
-            return Err((StatusCode::BAD_REQUEST, "code is malformed!"));
-        }
-        let player_id = player_id.unwrap();
-        let player;
-        //Check if player exists with the same code
-        {
-            let read_lock = state.players.read().await;
-            let existing_user = read_lock.get(&player_id);
-            if let Some(user) = existing_user {
-                if user.get_code() != code {
-                    return Err((
-                        StatusCode::UNAUTHORIZED,
-                        "Code doesn't match the Players code.",
-                    ));
-                }
-                player = user.clone();
-            } else {
-                return Err((StatusCode::NOT_FOUND, "Player with id not found!"));
-            }
-        }
-        //Check for existing game_setup
-        {
-            let mut write_lock = state.setups.write_owned().await;
-            let setup_option = write_lock.get_mut(&join_request.game_id);
-            if let Some(setup) = setup_option {
-                let join_result = setup.join(&player, join_request.game_code.as_deref());
-                let join_response = JoinResponse {
-                    game_id: join_request.game_id,
-                    state: join_result.into(),
-                };
-                //Update Player State
-                {
-                    let mut write_lock = state.players.write_owned().await;
-                    let player_option = write_lock.get_mut(&player_id);
-                    if let Some(player) = player_option {
-                        player.join_game_setup(join_response.game_id.clone());
-                    } else {
-                        unreachable!("Player should always exist at this point!");
-                    }
-                }
-                return Ok((StatusCode::OK, Json(join_response)));
-            } else {
-                return Err((StatusCode::NOT_FOUND, "Game setup not found"));
-            }
-        }
-    } else {
-        Err((StatusCode::UNAUTHORIZED, "Unauthorized"))
-    }
+    AuthPlayer(player): AuthPlayer,
+    Json(join_request): Json<JoinRequest>,
+) -> Result<(StatusCode, Json<JoinResponse>), (StatusCode, &'static str)> {
+    let game_id = join_request.game_id;
+    let mut setups = state.setups.write().await;
+    let setup = setups
+        .get_mut(&game_id)
+        .ok_or((StatusCode::NOT_FOUND, "Game setup not found"))?;
+    let join_result = setup.join(&player, join_request.game_code.as_deref());
+    state
+        .update_player(player.get_id(), |p| p.join_game_setup(game_id))
+        .await;
+    Ok((
+        StatusCode::OK,
+        Json(JoinResponse {
+            game_id,
+            state: join_result.into(),
+        }),
+    ))
 }
 
 async fn leave_setup(
-    headers: HeaderMap,
     State(state): State<App>,
-) -> Result<StatusCode, impl IntoResponse> {
-    let header_code = headers.get("code");
-    if let Some(code) = header_code {
-        let code = code.to_str();
-        if code.is_err() {
-            return Err((StatusCode::BAD_REQUEST, "code is malformed"));
-        }
-        let code = code.unwrap();
-        let player_id = Player::get_id_from_code(code);
-        if player_id.is_none() {
-            return Err((StatusCode::BAD_REQUEST, "code is malformed!"));
-        }
-        let player_id = player_id.unwrap();
-        let game_id: Option<Uuid>;
-        let is_creator;
-        //Check if player exists with the same code
-        {
-            let read_lock = state.players.read().await;
-            let existing_user = read_lock.get(&player_id);
-            if let Some(user) = existing_user {
-                if user.get_code() != code {
-                    return Err((
-                        StatusCode::UNAUTHORIZED,
-                        "Code doesn't match the Players code.",
-                    ));
-                } else if user.has_joined_game_setup() || user.has_created_game_setup() {
-                    game_id = user.get_game_id();
-                    is_creator = user.has_created_game_setup();
-                } else {
-                    return Err((
-                        StatusCode::CONFLICT,
-                        "Player is currently not in a game setup",
-                    ));
-                }
-            } else {
-                return Err((StatusCode::NOT_FOUND, "Player with id not found!"));
-            }
-        }
-
-        let game_id = game_id.expect("game_id should be set");
-        //Check if player exists as member of specified game session
-        {
-            let mut write_lock = state.setups.write_owned().await;
-            let game_setup_option = write_lock.get_mut(&game_id);
-            if let Some(game_setup) = game_setup_option {
-                if is_creator {
-                    //Effectively close game setup. Set all players to free
-                    for player in game_setup.players.iter() {
-                        //Update Player State
-                        {
-                            let mut write_lock = state.players.write().await;
-                            let player_option = write_lock.get_mut(&player.id);
-                            if let Some(player) = player_option {
-                                player.leave();
-                            } else {
-                                unreachable!("Player should always exist at this point!");
-                            }
-                        }
-                    }
-                    write_lock.remove_entry(&game_id);
-                    return Ok(StatusCode::OK);
-                } else {
-                    let remove_success = game_setup.remove_player(player_id);
-                    if remove_success {
-                        //Update Player State
-                        {
-                            let mut write_lock = state.players.write_owned().await;
-                            let player_option = write_lock.get_mut(&player_id);
-                            if let Some(player) = player_option {
-                                player.leave();
-                            } else {
-                                unreachable!("Player should always exist at this point!");
-                            }
-                        }
-                        return Ok(StatusCode::NO_CONTENT);
-                    } else {
-                        return Err((
-                            StatusCode::NOT_FOUND,
-                            "Player is not part of that game setup",
-                        ));
-                    }
-                }
-            } else {
-                return Err((StatusCode::NOT_FOUND, "Game setup doesn't exist"));
-            }
-        }
-    } else {
-        return Err((StatusCode::UNAUTHORIZED, "Unauthorized"));
+    AuthPlayer(player): AuthPlayer,
+) -> Result<StatusCode, (StatusCode, &'static str)> {
+    let is_creator = player.has_created_game_setup();
+    if !is_creator && !player.has_joined_game_setup() {
+        return Err((
+            StatusCode::CONFLICT,
+            "Player is currently not in a game setup",
+        ));
     }
+    let game_id = player.get_game_id().expect("game_id should be set");
+    let player_id = player.get_id();
+
+    let mut setups = state.setups.write().await;
+    let game_setup = setups
+        .get_mut(&game_id)
+        .ok_or((StatusCode::NOT_FOUND, "Game setup doesn't exist"))?;
+    if is_creator {
+        //Effectively close game setup. Set all players to free
+        for member in game_setup.players.iter() {
+            state.update_player(member.id, Player::leave).await;
+        }
+        setups.remove(&game_id);
+        return Ok(StatusCode::OK);
+    }
+    if !game_setup.remove_player(player_id) {
+        return Err((
+            StatusCode::NOT_FOUND,
+            "Player is not part of that game setup",
+        ));
+    }
+    state.update_player(player_id, Player::leave).await;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Serialize)]
@@ -752,72 +528,34 @@ struct GameSetupStatePlayerResponse {
 }
 
 async fn get_game_setup(
-    headers: HeaderMap,
     State(state): State<App>,
-) -> Result<(StatusCode, Json<GameSetupStateResponse>), impl IntoResponse> {
-    let header_code = headers.get("code");
-    if let Some(code) = header_code {
-        let code = code.to_str();
-        if code.is_err() {
-            return Err((StatusCode::BAD_REQUEST, "code is malformed"));
-        }
-        let code = code.unwrap();
-        let player_id = Player::get_id_from_code(code);
-        if player_id.is_none() {
-            return Err((StatusCode::BAD_REQUEST, "code is malformed!"));
-        }
-        let player_id = player_id.unwrap();
-        let game_id: Option<Uuid>;
-        //Check if player exists with the same code
-        {
-            let read_lock = state.players.read().await;
-            let existing_user = read_lock.get(&player_id);
-            if let Some(user) = existing_user {
-                if user.get_code() != code {
-                    return Err((
-                        StatusCode::UNAUTHORIZED,
-                        "Code doesn't match the Players code.",
-                    ));
-                } else if user.has_joined_game_setup() || user.has_created_game_setup() {
-                    game_id = user.get_game_id();
-                } else {
-                    return Err((
-                        StatusCode::CONFLICT,
-                        "Player is currently not in a game setup",
-                    ));
-                }
-            } else {
-                return Err((StatusCode::NOT_FOUND, "Player with id not found!"));
-            }
-        }
-
-        let game_id = game_id.expect("game_id should be set");
-        //Check if player exists as member of specified game session
-        {
-            let read_lock = state.setups.read_owned().await;
-            let game_setup_option = read_lock.get(&game_id);
-            if let Some(game_setup) = game_setup_option {
-                let players = game_setup
-                    .players
-                    .iter()
-                    .map(|p| GameSetupStatePlayerResponse {
-                        id: p.id.clone(),
-                        nick: p.nick.clone(),
-                    })
-                    .collect();
-                let game_setup_state_response = GameSetupStateResponse {
-                    id: game_id,
-                    players,
-                    is_ready: game_setup.is_ready,
-                };
-                return Ok((StatusCode::OK, Json(game_setup_state_response)));
-            } else {
-                return Err((StatusCode::NOT_FOUND, "Game setup doesn't exist"));
-            }
-        }
-    } else {
-        return Err((StatusCode::UNAUTHORIZED, "Unauthorized"));
+    AuthPlayer(player): AuthPlayer,
+) -> Result<Json<GameSetupStateResponse>, (StatusCode, &'static str)> {
+    if !player.has_joined_game_setup() && !player.has_created_game_setup() {
+        return Err((
+            StatusCode::CONFLICT,
+            "Player is currently not in a game setup",
+        ));
     }
+    let game_id = player.get_game_id().expect("game_id should be set");
+
+    let setups = state.setups.read().await;
+    let game_setup = setups
+        .get(&game_id)
+        .ok_or((StatusCode::NOT_FOUND, "Game setup doesn't exist"))?;
+    let players = game_setup
+        .players
+        .iter()
+        .map(|p| GameSetupStatePlayerResponse {
+            id: p.id,
+            nick: p.nick.clone(),
+        })
+        .collect();
+    Ok(Json(GameSetupStateResponse {
+        id: game_id,
+        players,
+        is_ready: game_setup.is_ready,
+    }))
 }
 
 #[derive(Serialize)]
@@ -826,87 +564,38 @@ struct GameStateResponse {
 }
 
 async fn start_game(
-    headers: HeaderMap,
     State(state): State<App>,
-) -> Result<(StatusCode, Json<GameStateResponse>), impl IntoResponse> {
-    let header_code = headers.get("code");
-    if let Some(code) = header_code {
-        let code = code.to_str();
-        if code.is_err() {
-            return Err((StatusCode::BAD_REQUEST, Cow::from("code is malformed")));
-        }
-        let code = code.unwrap();
-        let player_id = Player::get_id_from_code(code);
-        if player_id.is_none() {
-            return Err((StatusCode::BAD_REQUEST, Cow::from("code is malformed!")));
-        }
-        let player_id = player_id.unwrap();
-        let game_id: Option<Uuid>;
-        //Check if player exists with the same code
-        {
-            let read_lock = state.players.read().await;
-            let existing_user = read_lock.get(&player_id);
-            if let Some(user) = existing_user {
-                if user.get_code() != code {
-                    return Err((
-                        StatusCode::UNAUTHORIZED,
-                        Cow::from("Code doesn't match the Players code."),
-                    ));
-                } else if user.has_created_game_setup() {
-                    game_id = user.get_game_id();
-                } else if user.has_joined_game_setup() {
-                    return Err((
-                        StatusCode::BAD_REQUEST,
-                        Cow::from("Only the player who created the game setup can start the game"),
-                    ));
-                } else {
-                    return Err((
-                        StatusCode::CONFLICT,
-                        Cow::from("Player is currently not in a game setup"),
-                    ));
-                }
-            } else {
-                return Err((
-                    StatusCode::NOT_FOUND,
-                    Cow::from("Player with id not found!"),
-                ));
-            }
-        }
-
-        let game_id = game_id.expect("game_id should be set");
-        //Check if player exists as member of specified game session
-        {
-            let mut write_lock_setup = state.setups.write_owned().await;
-            let game_setup_option = write_lock_setup.get_mut(&game_id);
-            if let Some(game_setup) = game_setup_option {
-                if !game_setup.is_ready {
-                    return Err((
-                        StatusCode::BAD_REQUEST,
-                        Cow::from("Game setup is not ready to start yet"),
-                    ));
-                }
-                let mut write_lock_game = state.games.write_owned().await;
-                let new_game =
-                    eins_lib::game::Game::new(game_setup.players.iter().map(|p| p.id).collect());
-                match new_game {
-                    Ok(game) => {
-                        write_lock_game.insert(game_setup.creator, game);
-                        game_setup.set_is_ready();
-                        let response = GameStateResponse { game_id };
-                        Ok((StatusCode::OK, Json(response)))
-                    }
-                    Err(game_error) => {
-                        let err_msg = format!("Error: {}", game_error);
-                        Err((StatusCode::BAD_REQUEST, Cow::from(err_msg)))
-                    }
-                }
-            } else {
-                return Err((StatusCode::NOT_FOUND, Cow::from("Game setup doesn't exist")));
-            }
-        }
-    } else {
-        return Err((StatusCode::UNAUTHORIZED, Cow::from("Unauthorized")));
+    AuthPlayer(player): AuthPlayer,
+) -> Result<(StatusCode, Json<GameStateResponse>), (StatusCode, Cow<'static, str>)> {
+    if player.has_joined_game_setup() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Cow::from("Only the player who created the game setup can start the game"),
+        ));
     }
+    if !player.has_created_game_setup() {
+        return Err((
+            StatusCode::CONFLICT,
+            Cow::from("Player is currently not in a game setup"),
+        ));
+    }
+    let game_id = player.get_game_id().expect("game_id should be set");
+
+    let mut setups = state.setups.write().await;
+    let game_setup = setups
+        .get_mut(&game_id)
+        .ok_or((StatusCode::NOT_FOUND, Cow::from("Game setup doesn't exist")))?;
+    if !game_setup.is_ready {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Cow::from("Game setup is not ready to start yet"),
+        ));
+    }
+    let game = Game::new(game_setup.players.iter().map(|p| p.id).collect())
+        .map_err(|e| (StatusCode::BAD_REQUEST, Cow::from(format!("Error: {e}"))))?;
+    state.games.write().await.insert(game_setup.creator, game);
+    game_setup.set_is_ready();
+    Ok((StatusCode::OK, Json(GameStateResponse { game_id })))
 }
 
 async fn get_players(State(state): State<App>) -> impl IntoResponse {
