@@ -1,4 +1,4 @@
-use rand::{seq::SliceRandom, thread_rng};
+use rand::{rng, seq::SliceRandom};
 use serde::{Deserialize, Serialize};
 
 pub const MAX_CARD_NUMBER: usize = 108;
@@ -738,7 +738,7 @@ pub fn create_deck() -> Vec<CardReference> {
     for i in 0..MAX_CARD_NUMBER {
         result.push(CardReference::new(i).expect("CardReference should always work!"))
     }
-    result.shuffle(&mut thread_rng());
+    result.shuffle(&mut rng());
 
     result
 }
