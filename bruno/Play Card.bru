@@ -1,0 +1,27 @@
+meta {
+  name: Play Card
+  type: http
+  seq: 6
+}
+
+post {
+  url: http://127.0.0.1:8080/game/play
+  body: json
+  auth: none
+}
+
+headers {
+  code: {{code}}
+}
+
+body:json {
+  {
+    "card": 10,
+    "color": null,
+    "eins": false
+  }
+}
+
+docs {
+  `card` is an id from `hand` in Get Game. `color` (Red, Blue, Orange, Green) is required for wild cards and not allowed for others. Set `eins` when this play leaves you with one card, or you draw two penalty cards.
+}

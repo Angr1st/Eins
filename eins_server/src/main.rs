@@ -4,7 +4,8 @@ use axum::http::StatusCode;
 use axum::routing::post;
 use axum::Json;
 use axum::{response::IntoResponse, routing::get, Router};
-use eins_lib::game::Game;
+use eins_lib::cards::{CardReference, Color};
+use eins_lib::game::{Game, GameView, MoveError};
 use eins_lib::infrastructure::Player;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -284,6 +285,10 @@ fn app(state: App) -> Router {
         .route("/game/setup/leave", post(leave_setup))
         .route("/game/setup/start", post(start_game))
         .route("/game", get(get_games))
+        .route("/game/me", get(get_my_game))
+        .route("/game/play", post(play_card))
+        .route("/game/draw", post(draw_card))
+        .route("/game/leave", post(leave_game))
         .route("/health", get(get_app_health))
         .with_state(state)
 }
@@ -593,7 +598,8 @@ async fn start_game(
         ));
     }
     let game = Game::new(game_setup.players.iter().map(|p| p.id).collect())
-        .map_err(|e| (StatusCode::BAD_REQUEST, Cow::from(format!("Error: {e}"))))?;
+        .map_err(|e| (StatusCode::BAD_REQUEST, Cow::from(format!("Error: {e}"))))?
+        .start();
     let game_setup = setups.remove(&game_id).expect("checked above");
     state.games.write().await.insert(game_id, game);
     for member in game_setup.players.iter() {
@@ -606,6 +612,133 @@ async fn start_game(
         }
     }
     Ok((StatusCode::OK, Json(GameStateResponse { game_id })))
+}
+
+type ApiError = (StatusCode, String);
+
+fn running_game_id(player: &Player) -> Result<Uuid, ApiError> {
+    if !player.is_in_game() {
+        return Err((
+            StatusCode::CONFLICT,
+            "Player is currently not in a game".into(),
+        ));
+    }
+    Ok(player
+        .get_game_id()
+        .expect("players in a game have a game id"))
+}
+
+fn move_error(error: MoveError) -> ApiError {
+    let status = match error {
+        MoveError::GameNotRunning | MoveError::NotYourTurn => StatusCode::CONFLICT,
+        MoveError::NotInGame => StatusCode::FORBIDDEN,
+        MoveError::CardNotInHand
+        | MoveError::CardNotPlayable
+        | MoveError::ColorWishRequired
+        | MoveError::ColorWishNotAllowed => StatusCode::BAD_REQUEST,
+    };
+    (status, error.to_string())
+}
+
+/// Applies `make_move` to the player's game and returns their view of the result.
+async fn apply_move(
+    state: &App,
+    player: &Player,
+    make_move: impl FnOnce(Game) -> (Game, Result<(), MoveError>),
+) -> Result<Json<GameView>, ApiError> {
+    let game_id = running_game_id(player)?;
+    let mut games = state.games.write().await;
+    let game = games
+        .remove(&game_id)
+        .ok_or((StatusCode::NOT_FOUND, "Game doesn't exist".to_string()))?;
+    let (game, result) = make_move(game);
+    let view = game.view(player.get_id());
+    games.insert(game_id, game);
+    result.map_err(move_error)?;
+    Ok(Json(view.expect("the player is part of the game")))
+}
+
+async fn get_my_game(
+    State(state): State<App>,
+    AuthPlayer(player): AuthPlayer,
+) -> Result<Json<GameView>, ApiError> {
+    let game_id = running_game_id(&player)?;
+    let games = state.games.read().await;
+    let game = games
+        .get(&game_id)
+        .ok_or((StatusCode::NOT_FOUND, "Game doesn't exist".to_string()))?;
+    let view = game
+        .view(player.get_id())
+        .ok_or((StatusCode::FORBIDDEN, MoveError::NotInGame.to_string()))?;
+    Ok(Json(view))
+}
+
+#[derive(Deserialize)]
+struct PlayRequest {
+    card: CardReference,
+    /// Required for wild cards, not allowed for any other card.
+    color: Option<Color>,
+    /// The player's "Eins" call; leaving it out with one card left costs two cards.
+    #[serde(default)]
+    eins: bool,
+}
+
+async fn play_card(
+    State(state): State<App>,
+    AuthPlayer(player): AuthPlayer,
+    Json(request): Json<PlayRequest>,
+) -> Result<Json<GameView>, ApiError> {
+    let id = player.get_id();
+    apply_move(&state, &player, |game| {
+        game.play_card(id, request.card, request.color, request.eins)
+    })
+    .await
+}
+
+async fn draw_card(
+    State(state): State<App>,
+    AuthPlayer(player): AuthPlayer,
+) -> Result<Json<GameView>, ApiError> {
+    let id = player.get_id();
+    apply_move(&state, &player, |game| game.draw(id)).await
+}
+
+/// Leaves the current game. In a running game the others play on; the game is removed once
+/// every player has left it.
+async fn leave_game(
+    State(state): State<App>,
+    AuthPlayer(player): AuthPlayer,
+) -> Result<StatusCode, ApiError> {
+    let game_id = running_game_id(&player)?;
+    let player_id = player.get_id();
+    let mut games = state.games.write().await;
+    if let Some(game) = games.remove(&game_id) {
+        let game = match game {
+            running @ Game::Play(_) => {
+                let (game, result) = running.leave(player_id);
+                if let Err(error) = result {
+                    games.insert(game_id, game);
+                    return Err(move_error(error));
+                }
+                game
+            }
+            other => other,
+        };
+        games.insert(game_id, game);
+    }
+
+    let mut players = state.players.write().await;
+    players
+        .get_mut(&player_id)
+        .expect("Player should always exist at this point!")
+        .leave();
+    let anyone_left = players
+        .values()
+        .any(|p| p.is_in_game() && p.get_game_id() == Some(game_id));
+    if !anyone_left {
+        games.remove(&game_id);
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn get_players(State(state): State<App>) -> impl IntoResponse {
@@ -823,7 +956,7 @@ mod tests {
         let (_, games) = c.call("GET", "/game", None, None).await;
         assert_eq!(
             games["games"],
-            json!([{ "id": alice_id, "number_of_players": 2, "state": "Setup" }])
+            json!([{ "id": alice_id, "number_of_players": 2, "state": "Play" }])
         );
     }
 
@@ -837,5 +970,177 @@ mod tests {
             .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
         assert_eq!(c.state_of(&dave).await, "Free");
+    }
+
+    /// Registers alice and bob and starts a game between them; returns their (id, code).
+    async fn two_player_game(c: &Client) -> [(String, String); 2] {
+        let alice = c.register("alice").await;
+        let bob = c.register("bob").await;
+        c.call("POST", "/game/setup", Some(&alice.1), None).await;
+        c.join(&bob.1, &alice.0, None).await;
+        let (status, _) = c
+            .call("POST", "/game/setup/start", Some(&alice.1), None)
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        [alice, bob]
+    }
+
+    fn card_ids(view: &Value) -> Vec<Value> {
+        view["hand"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|h| h["id"].clone())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn players_only_see_their_own_hand() {
+        let c = Client::new();
+        let [(alice_id, alice), (bob_id, bob)] = two_player_game(&c).await;
+        let (status, alices) = c.call("GET", "/game/me", Some(&alice), None).await;
+        assert_eq!(status, StatusCode::OK);
+        let (_, bobs) = c.call("GET", "/game/me", Some(&bob), None).await;
+
+        assert_eq!(alices["state"], "Play");
+        assert_eq!(
+            alices["players"],
+            json!([{ "id": alice_id, "card_count": 7 }, { "id": bob_id, "card_count": 7 }])
+        );
+        let (alice_cards, bob_cards) = (card_ids(&alices), card_ids(&bobs));
+        assert_eq!((alice_cards.len(), bob_cards.len()), (7, 7));
+        assert!(alice_cards.iter().all(|card| !bob_cards.contains(card)));
+
+        let current = &alices["turn"]["current_player"];
+        assert_eq!(current, &bobs["turn"]["current_player"]);
+        let waiting = if current == &json!(alice_id) {
+            &bobs
+        } else {
+            &alices
+        };
+        assert_eq!(waiting["turn"]["playable"], json!([]));
+
+        let (_, carol) = c.register("carol").await;
+        assert_eq!(
+            c.call("GET", "/game/me", Some(&carol), None).await.0,
+            StatusCode::CONFLICT
+        );
+    }
+
+    #[tokio::test]
+    async fn moves_are_checked_and_applied() {
+        let c = Client::new();
+        let players = two_player_game(&c).await;
+        let view_of = |i: usize| c.call("GET", "/game/me", Some(&players[i].1), None);
+        let current_index = |view: &Value| {
+            players
+                .iter()
+                .position(|(id, _)| view["turn"]["current_player"] == json!(id))
+                .unwrap()
+        };
+        let (_, view) = view_of(0).await;
+        let (now, other) = if current_index(&view) == 0 {
+            (0, 1)
+        } else {
+            (1, 0)
+        };
+        let (_, current_view) = view_of(now).await;
+        let (_, other_view) = view_of(other).await;
+
+        let other_code = Some(players[other].1.as_str());
+        let now_code = Some(players[now].1.as_str());
+        assert_eq!(
+            c.call("POST", "/game/draw", other_code, None).await.0,
+            StatusCode::CONFLICT
+        );
+        let foreign_card = json!({ "card": card_ids(&other_view)[0], "color": "Red" });
+        let (status, _) = c
+            .call("POST", "/game/play", now_code, Some(foreign_card))
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, _) = c
+            .call("POST", "/game/play", now_code, Some(json!({ "card": 999 })))
+            .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+        let to_draw = current_view["turn"]["pending_draw"]
+            .as_u64()
+            .unwrap()
+            .max(1) as usize;
+        let (status, after_draw) = c.call("POST", "/game/draw", now_code, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(card_ids(&after_draw).len(), 7 + to_draw);
+        assert_eq!(
+            after_draw["turn"]["current_player"],
+            json!(players[other].0)
+        );
+
+        // Whoever can play first plays their first playable card.
+        for _ in 0..40 {
+            let (_, view) = view_of(0).await;
+            let i = current_index(&view);
+            let (_, view) = view_of(i).await;
+            let code = Some(players[i].1.as_str());
+            let Some(card) = view["turn"]["playable"]
+                .as_array()
+                .unwrap()
+                .first()
+                .cloned()
+            else {
+                c.call("POST", "/game/draw", code, None).await;
+                continue;
+            };
+            let hand_card = view["hand"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|h| h["id"] == card)
+                .unwrap();
+            let color = hand_card["card"].get("Wild").map(|_| "Green");
+            let body = json!({ "card": card, "color": color, "eins": true });
+            let (status, after) = c.call("POST", "/game/play", code, Some(body)).await;
+            assert_eq!(status, StatusCode::OK, "{after}");
+            assert_eq!(after["top_card"], hand_card["card"]);
+            assert!(!card_ids(&after).contains(&card));
+            return;
+        }
+        panic!("nobody could play a card");
+    }
+
+    #[tokio::test]
+    async fn leaving_finishes_and_finally_removes_the_game() {
+        let c = Client::new();
+        let [(alice_id, alice), (_, bob)] = two_player_game(&c).await;
+
+        let (status, _) = c.call("POST", "/game/leave", Some(&bob), None).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert_eq!(c.state_of(&bob).await, "Free");
+        let (_, view) = c.call("GET", "/game/me", Some(&alice), None).await;
+        assert_eq!(
+            (&view["state"], &view["winner"]),
+            (&json!("Finished"), &json!(alice_id))
+        );
+        assert_eq!(
+            c.call("GET", "/game", None, None).await.1["games"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+
+        c.call("POST", "/game/leave", Some(&alice), None).await;
+        assert_eq!(
+            c.call("GET", "/game", None, None).await.1["games"],
+            json!([])
+        );
+        assert_eq!(
+            c.call("GET", "/game/me", Some(&alice), None).await.0,
+            StatusCode::CONFLICT
+        );
+        // The creator can set up a new game afterwards.
+        assert_eq!(
+            c.call("POST", "/game/setup", Some(&alice), None).await.0,
+            StatusCode::CREATED
+        );
     }
 }
