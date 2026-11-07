@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use subtle::ConstantTimeEq;
 use tokio::sync::{broadcast, RwLock};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::{Stream, StreamExt};
@@ -153,7 +154,7 @@ impl GameSetup {
     fn has_correct_code(&self, code: Option<&str>) -> bool {
         if let Some(current_code) = &self.code {
             if let Some(check_code) = code {
-                return current_code == check_code;
+                return current_code.as_bytes().ct_eq(check_code.as_bytes()).into();
             }
             false
         } else {
@@ -347,7 +348,7 @@ impl FromRequestParts<App> for AuthPlayer {
         let player = players
             .get_mut(&player_id)
             .ok_or((StatusCode::NOT_FOUND, "Player with id not found!"))?;
-        if player.get_code() != code {
+        if !bool::from(player.get_code().as_bytes().ct_eq(code.as_bytes())) {
             return Err((
                 StatusCode::UNAUTHORIZED,
                 "Code doesn't match the Players code.",
@@ -1054,6 +1055,13 @@ mod tests {
             &alices
         };
         assert_eq!(waiting["turn"]["playable"], json!([]));
+
+        // Alice's id with Bob's secret does not open Alice's hand.
+        let forged = format!("{alice_id}{}", &bob[36..]);
+        assert_eq!(
+            c.call("GET", "/game/me", Some(&forged), None).await.0,
+            StatusCode::UNAUTHORIZED
+        );
 
         let (_, carol) = c.register("carol").await;
         assert_eq!(
