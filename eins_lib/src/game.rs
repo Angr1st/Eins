@@ -92,10 +92,9 @@ pub enum Game {
 }
 
 impl Game {
-    /// `players` are (id, nick) pairs in seating order. By convention the first player's id
-    /// is also the game id.
-    pub fn new(players: Vec<(Uuid, String)>) -> Result<Self, GameError> {
-        let actual_session = GameSession::new(players)?;
+    /// `players` are (id, nick) pairs in seating order; the first one is the creator.
+    pub fn new(game_id: Uuid, players: Vec<(Uuid, String)>) -> Result<Self, GameError> {
+        let actual_session = GameSession::new(game_id, players)?;
         Ok(Game::Setup(actual_session))
     }
 
@@ -288,7 +287,7 @@ impl GameSessionState for GamePlay {}
 impl GameSessionState for FinishGame {}
 
 impl GameSession<GameSetup> {
-    pub fn new(players: Vec<(Uuid, String)>) -> Result<Self, GameError> {
+    pub fn new(game_id: Uuid, players: Vec<(Uuid, String)>) -> Result<Self, GameError> {
         let player_number: usize = players.len();
         if player_number < 2 {
             return Err(GameError::NotEnoughPlayers);
@@ -311,7 +310,7 @@ impl GameSession<GameSetup> {
             game_direction: GameDirection::Clockwise,
             current_player: rand::random_range(0..player_number),
             player_number,
-            game_id: creator_id,
+            game_id,
             creator_id,
         };
 
@@ -834,16 +833,16 @@ mod tests {
     }
 
     #[test]
-    fn game_id_is_creator_id() {
-        let seats = seats(3);
-        let game = Game::new(seats.clone()).unwrap();
-        assert_eq!(game.get_game_id(), &seats[0].0);
+    fn game_keeps_its_id_and_the_first_seat_is_the_creator() {
+        let (game_id, seats) = (Uuid::new_v4(), seats(3));
+        let game = Game::new(game_id, seats.clone()).unwrap();
+        assert_eq!(game.get_game_id(), &game_id);
         assert_eq!(game.get_creator_id(), &seats[0].0);
     }
 
     #[test]
     fn game_reports_session_state() {
-        let game = Game::new(seats(2)).unwrap();
+        let game = Game::new(Uuid::new_v4(), seats(2)).unwrap();
         assert_eq!(game.get_game_session_state(), "Setup");
         let Game::Setup(setup) = game else {
             unreachable!()
@@ -857,7 +856,7 @@ mod tests {
     #[test]
     fn moves_need_a_running_game() {
         let seats = seats(2);
-        let game = Game::new(seats.clone()).unwrap();
+        let game = Game::new(Uuid::new_v4(), seats.clone()).unwrap();
         let (game, result) = game.draw(seats[0].0);
         assert_eq!(result, Err(MoveError::GameNotRunning));
         assert_eq!(game.get_game_session_state(), "Setup");
@@ -1178,7 +1177,7 @@ mod tests {
     fn the_first_player_is_random() {
         let first: HashSet<usize> = (0..50)
             .map(|_| {
-                GameSession::<GameSetup>::new(seats(4))
+                GameSession::<GameSetup>::new(Uuid::new_v4(), seats(4))
                     .unwrap()
                     .session_state
                     .current_player

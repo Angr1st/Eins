@@ -7,10 +7,10 @@ use crate::game::Hand;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PlayerState {
     Free,
-    GameSetupCreated,
-    GameSetupUpdated,
+    GameSetupCreated(Uuid),
+    GameSetupUpdated(Uuid),
     GameSetupJoined(Uuid),
-    GameStarted,
+    GameStarted(Uuid),
     GameJoined(Uuid),
 }
 
@@ -56,7 +56,7 @@ impl Player {
     pub fn has_created_game_setup(&self) -> bool {
         matches!(
             self.state,
-            PlayerState::GameSetupCreated | PlayerState::GameSetupUpdated
+            PlayerState::GameSetupCreated(_) | PlayerState::GameSetupUpdated(_)
         )
     }
 
@@ -67,18 +67,18 @@ impl Player {
     pub fn is_in_game(&self) -> bool {
         matches!(
             self.state,
-            PlayerState::GameStarted | PlayerState::GameJoined(_)
+            PlayerState::GameStarted(_) | PlayerState::GameJoined(_)
         )
     }
 
     pub fn get_game_id(&self) -> Option<Uuid> {
         match self.state {
             PlayerState::Free => None,
-            PlayerState::GameSetupCreated => Some(self.get_id()),
-            PlayerState::GameSetupUpdated => Some(self.get_id()),
-            PlayerState::GameSetupJoined(uuid) => Some(uuid),
-            PlayerState::GameStarted => Some(self.get_id()),
-            PlayerState::GameJoined(uuid) => Some(uuid),
+            PlayerState::GameSetupCreated(uuid)
+            | PlayerState::GameSetupUpdated(uuid)
+            | PlayerState::GameSetupJoined(uuid)
+            | PlayerState::GameStarted(uuid)
+            | PlayerState::GameJoined(uuid) => Some(uuid),
         }
     }
 
@@ -102,20 +102,20 @@ impl Player {
         self.update_activity(PlayerState::Free);
     }
 
-    pub fn create_game_setup(&mut self) {
-        self.update_activity(PlayerState::GameSetupCreated);
+    pub fn create_game_setup(&mut self, game_id: Uuid) {
+        self.update_activity(PlayerState::GameSetupCreated(game_id));
     }
 
-    pub fn update_game_setup(&mut self) {
-        self.update_activity(PlayerState::GameSetupUpdated);
+    pub fn update_game_setup(&mut self, game_id: Uuid) {
+        self.update_activity(PlayerState::GameSetupUpdated(game_id));
     }
 
     pub fn join_game_setup(&mut self, game_id: Uuid) {
         self.update_activity(PlayerState::GameSetupJoined(game_id));
     }
 
-    pub fn start_game(&mut self) {
-        self.update_activity(PlayerState::GameStarted);
+    pub fn start_game(&mut self, game_id: Uuid) {
+        self.update_activity(PlayerState::GameStarted(game_id));
     }
 
     pub fn join_game(&mut self, game_id: Uuid) {

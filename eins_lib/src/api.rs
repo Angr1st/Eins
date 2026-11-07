@@ -103,6 +103,7 @@ pub struct JoinResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameSetupStateResponse {
     pub id: Uuid,
+    pub host_id: Uuid,
     pub players: Vec<GameSetupStatePlayerResponse>,
     pub is_ready: bool,
 }

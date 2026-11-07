@@ -205,7 +205,11 @@ fn draw_waiting(
     if let Some(setup) = setup {
         lines.push(Line::from(format!("Players ({}):", setup.players.len())).bold());
         for player in &setup.players {
-            let host = if player.id == setup.id { " (host)" } else { "" };
+            let host = if player.id == setup.host_id {
+                " (host)"
+            } else {
+                ""
+            };
             lines.push(Line::from(format!("  • {}{host}", player.nick)));
         }
         lines.push(Line::from(""));
@@ -747,9 +751,10 @@ mod tests {
     #[test]
     fn only_the_host_can_start() {
         let mut host = app("alice");
-        let host_id = host.my_id().unwrap();
+        let (host_id, game_id) = (host.my_id().unwrap(), Uuid::new_v4());
         let setup = || GameSetupStateResponse {
-            id: host_id,
+            id: game_id,
+            host_id,
             players: vec![
                 GameSetupStatePlayerResponse {
                     id: host_id,
@@ -763,7 +768,7 @@ mod tests {
             is_ready: true,
         };
 
-        host.me.as_mut().unwrap().create_game_setup();
+        host.me.as_mut().unwrap().create_game_setup(game_id);
         host.screen = Screen::Waiting {
             setup: Some(setup()),
         };
@@ -772,7 +777,7 @@ mod tests {
         assert!(shows(&screen, "Start (s)"));
 
         let mut guest = app("bob");
-        guest.me.as_mut().unwrap().join_game_setup(host_id);
+        guest.me.as_mut().unwrap().join_game_setup(game_id);
         guest.screen = Screen::Waiting {
             setup: Some(setup()),
         };

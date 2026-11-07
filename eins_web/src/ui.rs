@@ -112,7 +112,7 @@ impl App {
                                 html! { <section class="waiting panel"><p class="eyebrow">{"A LITTLE COMPANY GOES A LONG WAY"}</p><h1>{"At the table"}</h1>
                                     <p class="muted">{if host { "Your table is in the lobby. Invite your friends to take a seat." } else { "You’re in. The host will start the game when everyone is here." }}</p>
                                     <ul class="seats">{for setup.players.iter().enumerate().map(|(i, player)| html! {
-                                        <li key={player.id.to_string()}><span class="avatar">{i + 1}</span><strong>{&player.nick}</strong><span class="muted">{if player.id == setup.id { "Host" } else { "Ready" }}</span></li>
+                                        <li key={player.id.to_string()}><span class="avatar">{i + 1}</span><strong>{&player.nick}</strong><span class="muted">{if player.id == setup.host_id { "Host" } else { "Ready" }}</span></li>
                                     })}</ul>
                                     <div class="actions">if host { <button class="primary" disabled={self.busy || !setup.is_ready} onclick={link.callback(|_| Msg::Act(Action::Start))}>{"Start game →"}</button> }
                                         <button disabled={self.busy} onclick={link.callback(|_| Msg::Act(Action::LeaveSetup))}>{if host { "Close table" } else { "Leave table" }}</button>
