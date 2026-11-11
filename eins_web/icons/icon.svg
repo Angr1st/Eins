@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>Eins playing cards</title>
+  <path fill="#173e36" d="M0 0h512v512H0z"/>
+  <g stroke="#fffdf5" stroke-width="10" stroke-linejoin="round">
+    <g transform="rotate(-23 183 262)">
+      <rect x="113" y="152" width="140" height="220" rx="18" fill="#bd5345"/>
+      <path d="M136 177h25M136 191h16" fill="none" stroke-width="7" stroke-linecap="round"/>
+    </g>
+    <g transform="rotate(-5 253 239)">
+      <rect x="183" y="129" width="140" height="220" rx="18" fill="#d99a42"/>
+      <path d="M206 154h25M206 168h16" fill="none" stroke-width="7" stroke-linecap="round"/>
+    </g>
+    <g transform="rotate(17 325 265)">
+      <rect x="255" y="155" width="140" height="220" rx="18" fill="#38674f"/>
+      <path d="M278 180h25M278 194h16" fill="none" stroke-width="7" stroke-linecap="round"/>
+      <path d="M295 241l26-20h21v88h-26v-58l-11 9z" fill="#fffdf5" stroke="none"/>
+      <path d="M372 350h-25M372 336h-16" fill="none" stroke-width="7" stroke-linecap="round"/>
+    </g>
+  </g>
+</svg>

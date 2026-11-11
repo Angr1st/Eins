@@ -80,6 +80,10 @@ header; disable response buffering for `/api/events` and allow long-lived SSE
 responses. Do not cache API responses. Serve `.wasm` as `application/wasm`.
 Trunk's proxy is for development, not a production deployment.
 
+Serve `.webmanifest` as `application/manifest+json`. Keep the manifest link's
+`crossorigin="use-credentials"` so it can load behind authentication such as
+Cloudflare Access, even when hosted on the same origin.
+
 The UI uses Google Fonts with local sans-serif fallbacks. Node is only needed
 for browser tests, not to build or run the client.
 
@@ -107,3 +111,23 @@ already running on the configured ports. Set `CHROME_PATH` to use an installed
 Chromium executable instead of downloading one. Tests cover two independent
 players, private-code rejection, pushed updates, drawing, wild color selection,
 Eins, reload recovery, leaving, and expired sessions.
+
+## Add to the iPhone home screen
+
+Open the HTTPS site in Safari, tap **Share → Add to Home Screen**, and keep
+**Open as Web App** enabled if offered. Eins uses a three-card icon and opens
+in standalone mode. If an existing shortcut still shows the old icon, remove
+that shortcut and add it again after the updated site is deployed.
+The game still requires a network connection; there is no offline game cache.
+
+The icon source is `icons/icon.svg`. The opaque PNG exports let iOS apply its
+own rounded corners and support iOS versions before SVG icon support in iOS 26.
+The Apple icon is rendered at 1024×1024 so larger previews do not upscale a
+small bitmap. After editing the SVG, regenerate them with uv, CairoSVG,
+and ImageMagick (CairoSVG preserves the SVG transforms):
+
+```sh
+uvx --from cairosvg cairosvg icons/icon.svg -f png -s 4 | magick - -resize 512x512 -alpha off PNG24:icons/icon-512.png
+magick icons/icon-512.png -resize 192x192 PNG24:icons/icon-192.png
+uvx --from cairosvg cairosvg icons/icon.svg -f png -s 4 | magick - -resize 1024x1024 -alpha off PNG24:icons/apple-touch-icon.png
+```

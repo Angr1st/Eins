@@ -1,5 +1,33 @@
 import { test, expect } from '@playwright/test';
 
+test('home-screen installation exposes the card icons and standalone metadata', async ({ page, request }) => {
+  await page.goto('/');
+  await expect(page.locator('meta[name="apple-mobile-web-app-capable"]')).toHaveAttribute('content', 'yes');
+  await expect(page.locator('meta[name="apple-mobile-web-app-title"]')).toHaveAttribute('content', 'Eins');
+  await expect(page.locator('link[rel="manifest"]')).toHaveAttribute('crossorigin', 'use-credentials');
+  const manifestURL = await page.locator('link[rel="manifest"]').getAttribute('href');
+  const response = await request.get(manifestURL);
+  expect(response.ok()).toBe(true);
+  const manifest = await response.json();
+  expect(manifest).toMatchObject({ name: 'Eins', start_url: '/', scope: '/', display: 'standalone' });
+  expect(manifest.icons.map(icon => icon.sizes)).toEqual(expect.arrayContaining(['192x192', '512x512']));
+  const appleIcon = await page.locator('link[rel="apple-touch-icon"]').getAttribute('href');
+  await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute('sizes', '1024x1024');
+  const icons = [...manifest.icons, { src: appleIcon, sizes: '1024x1024' }];
+  for (const icon of icons) {
+    const image = await request.get(icon.src);
+    expect(image.ok()).toBe(true);
+    expect(image.headers()['content-type']).toContain('image/png');
+    const size = await page.evaluate(async src => {
+      const image = new Image();
+      image.src = src;
+      await image.decode();
+      return `${image.naturalWidth}x${image.naturalHeight}`;
+    }, icon.src);
+    expect(size).toBe(icon.sizes);
+  }
+});
+
 test('two browsers share a private table, moves, and the result', async ({ browser, baseURL }) => {
   const hostContext = await browser.newContext();
   const guestContext = await browser.newContext();
