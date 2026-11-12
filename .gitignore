@@ -4,3 +4,5 @@
 /eins_web/dist/
 /eins_web/node_modules/
 /eins_web/test-results/
+/deployment/bundle/
+/deployment/.bundle-*/

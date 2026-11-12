@@ -76,6 +76,10 @@ restart ends all sessions and games.
 
 ## Build and host
 
+For a Hostinger VPS reachable only through Cloudflare Tunnel, use the
+[native NixOS deployment guide](../deployment/README.md). It serves the website
+and API on one hostname with loopback-only origins and no inbound web ports.
+
 ```sh
 trunk build --release --locked
 ```
