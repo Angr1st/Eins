@@ -34,7 +34,9 @@ multiple players. Duplicating an existing tab may copy its session; open a fresh
 tab instead.
 
 Register a nickname, create or join an open/private table, then let the host
-start. Highlighted cards are playable. Wild cards open a color chooser; Escape
+start. Cards do not reveal which moves are legal. Trying an illegal card briefly
+shakes it and outlines it in red (outline only with reduced motion enabled).
+Wild cards open a color chooser; Escape
 cancels. Call Eins before playing down to one card. Draw and leave use the same
 server rules as the terminal client.
 

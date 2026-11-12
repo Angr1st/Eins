@@ -201,7 +201,7 @@ impl App {
                         } else { <strong>{"Well played."}</strong><p>{"Another round? Head back to the lobby."}</p> }</div>
                     </div>
                 </div>
-                <div class="hand-heading"><div><h2>{"Your hand"}<span class="count">{view.hand.len()}</span></h2><p class="muted">{if view.winner.is_some() { "The round is over. These are your remaining cards." } else if my_turn { "Choose a highlighted card to play." } else { "Take a moment. Plan your next move." }}</p></div>
+                <div class="hand-heading"><div><h2>{"Your hand"}<span class="count">{view.hand.len()}</span></h2><p class="muted">{if view.winner.is_some() { "The round is over. These are your remaining cards." } else if my_turn { "Choose a card to play." } else { "Take a moment. Plan your next move." }}</p></div>
                     if view.winner.is_none() { <div class="actions"><button class={classes!(self.eins.then_some("called"))} aria-pressed={self.eins.to_string()} disabled={self.busy} onclick={link.callback(|_| Msg::ToggleEins)}>{if self.eins { "Eins! ✓" } else { "Call Eins!" }}</button>
                         <button class="primary" disabled={self.busy || !my_turn} onclick={link.callback(|_| Msg::Act(Action::Draw))}>{view.turn.as_ref().filter(|t| t.pending_draw > 0).map_or("Draw a card".into(), |t| format!("Draw {} cards", t.pending_draw))}</button></div> }
                 </div>
@@ -209,7 +209,7 @@ impl App {
                 <div class="hand">{for view.hand.iter().map(|hand_card| {
                     let id = hand_card.id;
                     let (color, symbol) = card_text(hand_card.card);
-                    html! { <button key={id.card_number()} class={classes!("card", color, self.can_play(id).then_some("playable"))} disabled={self.busy || !self.can_play(id)} aria-label={format!("Play {color} {symbol}")} onclick={link.callback(move |_| Msg::SelectCard(id))}>{card_face(hand_card.card)}</button> }
+                    html! { <button key={id.card_number()} class={classes!("card", color, (self.rejected_card == Some(id)).then_some("rejected"))} disabled={self.busy || !my_turn} aria-label={format!("Play {color} {symbol}")} onclick={link.callback(move |_| Msg::SelectCard(id))} onanimationend={link.callback(move |_| Msg::ClearRejectedCard(id))}>{card_face(hand_card.card)}</button> }
                 })}</div>
                 if view.winner.is_none() { <p class="hand-note">{"Down to your last two? Call Eins before playing your next card."}</p> }
             </section>

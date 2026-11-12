@@ -80,15 +80,44 @@ test('two browsers share a private table, moves, and the result', async ({ brows
     await expect(active.getByRole('button', { name: /^Play / })).toHaveCount(expectedCount);
     await expect(waiting.getByRole('heading', { name: 'Your move.', exact: true })).toBeVisible();
 
-    // Draw until a wild card is available, regardless of the shuffled deal. Never mock the rules.
+    // Find moves through the API: the UI must not identify legal cards for the player.
     let playedWild = false;
-    for (let turn = 0; turn < 108 && !playedWild; turn++) {
+    let rejectedCard = false;
+    for (let turn = 0; turn < 108 && (!playedWild || !rejectedCard); turn++) {
       const state = await view(host);
       const player = state.turn.current_player === state.players[0].id ? host : guest;
       const other = player === host ? guest : host;
       await expect(player.getByRole('button', { name: /^Draw / })).toBeEnabled();
-      const wild = player.locator('.hand button.Wild:enabled').first();
-      if (await wild.count()) {
+      const hand = await view(player);
+      const cards = player.getByRole('button', { name: /^Play / });
+      await expect(player.locator('.hand button:enabled')).toHaveCount(hand.hand.length);
+      const appearances = await cards.evaluateAll(cards => cards.map(card => {
+        const style = getComputedStyle(card);
+        return [style.opacity, style.boxShadow, style.borderColor];
+      }));
+      expect(new Set(appearances.map(style => JSON.stringify(style))).size).toBe(1);
+      const invalid = hand.hand.findIndex(card => !hand.turn.playable.includes(card.id));
+      if (!rejectedCard && invalid >= 0) {
+        const card = cards.nth(invalid);
+        const restingShadow = await card.evaluate(card => getComputedStyle(card).boxShadow);
+        // Both pointer and repeated keyboard attempts give temporary feedback without a move.
+        for (const reducedMotion of ['no-preference', 'reduce']) {
+          await player.emulateMedia({ reducedMotion });
+          if (reducedMotion === 'reduce') await card.press('Enter');
+          else await card.click();
+          await expect(card).toHaveCSS('box-shadow', /rgb\(201, 45, 38\)/);
+          if (reducedMotion === 'reduce') await expect(card).toHaveCSS('translate', '0px');
+          else await expect(card).not.toHaveCSS('translate', /^(none|0px)$/);
+          await expect(card).toHaveCSS('box-shadow', restingShadow);
+          expect(await view(player)).toEqual(hand);
+          await expect(player.getByRole('group', { name: 'Choose the next color' })).toHaveCount(0);
+        }
+        await player.emulateMedia({ reducedMotion: 'no-preference' });
+        rejectedCard = true;
+      }
+      const wildIndex = hand.hand.findIndex(card => card.card.Wild && hand.turn.playable.includes(card.id));
+      if (!playedWild && wildIndex >= 0) {
+        const wild = cards.nth(wildIndex);
         const handCount = await player.getByRole('button', { name: /^Play / }).count();
         await player.getByRole('button', { name: 'Call Eins!', exact: true }).click();
         await wild.click();
@@ -108,6 +137,7 @@ test('two browsers share a private table, moves, and the result', async ({ brows
       }
     }
     expect(playedWild).toBe(true);
+    expect(rejectedCard).toBe(true);
 
     let playedNormal = false;
     for (let turn = 0; turn < 108 && !playedNormal; turn++) {
@@ -115,8 +145,10 @@ test('two browsers share a private table, moves, and the result', async ({ brows
       const player = state.turn.current_player === state.players[0].id ? host : guest;
       const other = player === host ? guest : host;
       await expect(player.getByRole('button', { name: /^Draw / })).toBeEnabled();
-      const card = player.locator('.hand button:enabled:not(.Wild)').first();
-      if (await card.count()) {
+      const hand = await view(player);
+      const cardIndex = hand.hand.findIndex(card => card.card.Normal && hand.turn.playable.includes(card.id));
+      if (cardIndex >= 0) {
+        const card = player.getByRole('button', { name: /^Play / }).nth(cardIndex);
         const label = (await card.getAttribute('aria-label')).replace('Play ', 'Top card: ');
         const count = await player.getByRole('button', { name: /^Play / }).count();
         await card.click();

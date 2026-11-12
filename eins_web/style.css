@@ -107,7 +107,15 @@ small { display: block; color: #788273; font-size: 12px; margin-top: 13px; }
 .hand { display: flex; flex-wrap: wrap; gap: 12px; padding: 12px 0; }
 .hand .card { width: 88px; height: 127px; }
 .hand .card:disabled { opacity: .55; }
-.hand .card.playable { box-shadow: 0 0 0 2px #5b8056, 0 6px 12px #142c261c; }
+.hand .card.rejected { box-shadow: 0 0 0 3px #c92d26, 0 5px 10px #142c2626; animation: card-shake .6s ease-in-out; }
+@keyframes card-shake {
+  0%, 100% { translate: 0; }
+  15%, 45% { translate: -6px; }
+  30%, 60% { translate: 6px; }
+  75% { translate: -3px; }
+  90% { translate: 3px; }
+}
+@keyframes card-rejected-still { from, to { translate: 0; } }
 .hand .card:hover:not(:disabled) { transform: translateY(-7px); }
 .hand .Red:hover:not(:disabled) { background: #b8493c; }
 .hand .Blue:hover:not(:disabled) { background: #336e94; }
@@ -150,4 +158,7 @@ small { display: block; color: #788273; font-size: 12px; margin-top: 13px; }
   .hand .card-corner, .hand .card-bottom { font-size: 8px; }
   footer { flex-direction: column; align-items: flex-start; justify-content: center; gap: 8px; padding: 20px 0; }
 }
-@media (prefers-reduced-motion: reduce) { button { transition: none; } }
+@media (prefers-reduced-motion: reduce) {
+  button { transition: none; }
+  .hand .card.rejected { animation-name: card-rejected-still; }
+}

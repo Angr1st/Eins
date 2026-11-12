@@ -29,6 +29,7 @@ enum Msg {
     Prompt(Option<Prompt>),
     SubmitCode,
     SelectCard(CardReference),
+    ClearRejectedCard(CardReference),
     PickColor(Color),
     ToggleEins,
 }
@@ -48,6 +49,7 @@ struct App {
     connected: bool,
     error: Option<String>,
     listener: Option<AbortHandle>,
+    rejected_card: Option<CardReference>,
 }
 
 fn storage() -> Option<web_sys::Storage> {
@@ -146,6 +148,7 @@ impl Component for App {
             connected: false,
             error: None,
             listener: None,
+            rejected_card: None,
         };
         if app.api.code.is_some() {
             app.listen(ctx);
@@ -203,6 +206,7 @@ impl Component for App {
                         if changed_screen {
                             self.prompt = None;
                             self.eins = false;
+                            self.rejected_card = None;
                         }
                         if let Some(Prompt::Color(card)) = self.prompt {
                             if !self.can_play(card) {
@@ -280,14 +284,24 @@ impl Component for App {
                 ctx.link().send_message(Msg::Act(action));
             }
             Msg::SelectCard(id) => {
-                if self.busy || !self.can_play(id) {
+                if self.busy || !self.my_turn() {
                     return false;
                 }
+                if !self.can_play(id) {
+                    self.rejected_card = Some(id);
+                    return true;
+                }
+                self.rejected_card = None;
                 if matches!(eins_lib::cards::get_card(&id), CardTypes::Wild(_)) {
                     self.prompt = Some(Prompt::Color(id));
                     self.focus_prompt = true;
                 } else {
                     self.play(ctx, id, None);
+                }
+            }
+            Msg::ClearRejectedCard(id) => {
+                if self.rejected_card == Some(id) {
+                    self.rejected_card = None;
                 }
             }
             Msg::PickColor(color) => {
