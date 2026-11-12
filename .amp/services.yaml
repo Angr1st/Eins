@@ -1,11 +1,12 @@
 services:
+  # Activate tools after the supervisor loads its environment; login-shell PATH can be reset.
   eins-api:
-    command: cargo run -p eins_server --locked
+    command: mise exec -- cargo run -p eins_server --locked
     port: 8080
     health: /health
 
   eins-web:
-    command: trunk serve --release --locked --address 0.0.0.0 --port "$PORT"
+    command: mise exec -- trunk serve --release --locked --address 0.0.0.0 --port "$PORT"
     cwd: eins_web
     port: 8082
     health: /api/health
