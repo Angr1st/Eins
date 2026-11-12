@@ -7,10 +7,18 @@ use eins_lib::cards::{CardReference, CardTypes, Color};
 use eins_lib::infrastructure::Player;
 use futures_util::future::{AbortHandle, Abortable};
 use uuid::Uuid;
+use wasm_bindgen::prelude::*;
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 
 const SESSION_KEY: &str = "eins.player-code";
+
+#[wasm_bindgen(module = "/src/motion.js")]
+extern "C" {
+    fn capture_cards() -> JsValue;
+    fn animate_cards(before: JsValue);
+    fn cancel_card_motion();
+}
 
 enum Prompt {
     Create,
@@ -50,6 +58,7 @@ struct App {
     error: Option<String>,
     listener: Option<AbortHandle>,
     rejected_card: Option<CardReference>,
+    card_layout: Option<JsValue>,
 }
 
 fn storage() -> Option<web_sys::Storage> {
@@ -69,6 +78,8 @@ impl App {
 
     fn fail(&mut self, error: Error) {
         if error.expired {
+            cancel_card_motion();
+            self.card_layout = None;
             if let Some(listener) = self.listener.take() {
                 listener.abort();
             }
@@ -149,6 +160,7 @@ impl Component for App {
             error: None,
             listener: None,
             rejected_card: None,
+            card_layout: None,
         };
         if app.api.code.is_some() {
             app.listen(ctx);
@@ -201,6 +213,19 @@ impl Component for App {
                         let changed_screen = self.screen.as_ref().is_none_or(|old| {
                             std::mem::discriminant(old) != std::mem::discriminant(&snapshot.screen)
                         });
+                        // Capture the old DOM only for updates within this round. Initial
+                        // deals and restored sessions should appear immediately.
+                        self.card_layout = match (&self.screen, &snapshot.screen) {
+                            (Some(Screen::Game(old)), Screen::Game(new))
+                                if old.game_id == new.game_id =>
+                            {
+                                Some(capture_cards())
+                            }
+                            _ => {
+                                cancel_card_motion();
+                                None
+                            }
+                        };
                         self.me = Some(snapshot.me);
                         self.screen = Some(snapshot.screen);
                         if changed_screen {
@@ -317,6 +342,9 @@ impl Component for App {
     }
 
     fn rendered(&mut self, _: &Context<Self>, _: bool) {
+        if let Some(before) = self.card_layout.take() {
+            animate_cards(before);
+        }
         if self.focus_prompt {
             let target = match self.prompt {
                 Some(Prompt::Create | Prompt::Join(_)) => &self.code,
@@ -330,6 +358,7 @@ impl Component for App {
     }
 
     fn destroy(&mut self, _: &Context<Self>) {
+        cancel_card_motion();
         if let Some(listener) = self.listener.take() {
             listener.abort();
         }

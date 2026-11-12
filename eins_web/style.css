@@ -105,7 +105,9 @@ small { display: block; color: #788273; font-size: 12px; margin-top: 13px; }
 .hand-heading h2 { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
 .count { background: #e7eadd; font-size: 12px; padding: 4px 9px; border-radius: 15px; }
 .hand { display: flex; flex-wrap: wrap; gap: 12px; padding: 12px 0; }
-.hand .card { width: 88px; height: 127px; }
+.hand-card { width: 88px; height: 127px; }
+.card-flight { position: fixed; z-index: 100; pointer-events: none; margin: 0; transition: none; }
+.flight-back { position: absolute; inset: 0; border-radius: 6px; display: grid; place-items: center; background: repeating-linear-gradient(45deg, #24483f 0px, #24483f 5px, #315b4d 5px, #315b4d 7px); color: #f4f3db; font-family: 'Outfit', sans-serif; font-size: 26px; font-weight: 800; }
 .hand .card:disabled { opacity: .55; }
 .hand .card.rejected { box-shadow: 0 0 0 3px #c92d26, 0 5px 10px #142c2626; animation: card-shake .6s ease-in-out; }
 @keyframes card-shake {
@@ -152,10 +154,10 @@ small { display: block; color: #788273; font-size: 12px; margin-top: 13px; }
   .turn-info .active-color { display: inline; font-size: 20px; margin-left: 10px; }
   .hand-heading { align-items: flex-start; flex-direction: column; gap: 4px; }
   .hand { gap: 10px; }
-  .hand .card { width: 72px; height: 106px; }
-  .hand .card strong { font-size: 22px; }
-  .hand .card strong.word-symbol { font-size: 13px; }
-  .hand .card-corner, .hand .card-bottom { font-size: 8px; }
+  .hand-card { width: 72px; height: 106px; }
+  .hand-card strong { font-size: 22px; }
+  .hand-card strong.word-symbol { font-size: 13px; }
+  .hand-card .card-corner, .hand-card .card-bottom { font-size: 8px; }
   footer { flex-direction: column; align-items: flex-start; justify-content: center; gap: 8px; padding: 20px 0; }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -209,7 +209,7 @@ impl App {
                 <div class="hand">{for view.hand.iter().map(|hand_card| {
                     let id = hand_card.id;
                     let (color, symbol) = card_text(hand_card.card);
-                    html! { <button key={id.card_number()} class={classes!("card", color, (self.rejected_card == Some(id)).then_some("rejected"))} disabled={self.busy || !my_turn} aria-label={format!("Play {color} {symbol}")} onclick={link.callback(move |_| Msg::SelectCard(id))} onanimationend={link.callback(move |_| Msg::ClearRejectedCard(id))}>{card_face(hand_card.card)}</button> }
+                    html! { <button key={id.card_number()} data-card={id.card_number().to_string()} class={classes!("card", "hand-card", color, (self.rejected_card == Some(id)).then_some("rejected"))} disabled={self.busy || !my_turn} aria-label={format!("Play {color} {symbol}")} onclick={link.callback(move |_| Msg::SelectCard(id))} onanimationend={link.callback(move |_| Msg::ClearRejectedCard(id))}>{card_face(hand_card.card)}</button> }
                 })}</div>
                 if view.winner.is_none() { <p class="hand-note">{"Down to your last two? Call Eins before playing your next card."}</p> }
             </section>

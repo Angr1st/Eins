@@ -197,3 +197,133 @@ test('an empty proxy failure is visible and registration can be retried', async 
   await page.getByRole('button', { name: 'Find a table' }).click();
   await expect(page.getByRole('heading', { name: 'The lobby' })).toBeVisible();
 });
+
+for (const width of [1280, 390]) {
+  test(`confirmed cards travel between their actual positions at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    const me = '00000000-0000-4000-8000-000000000001';
+    const game = '00000000-0000-4000-8000-000000000002';
+    const normal = (id, color, symbol) => ({ id, card: { Normal: { color, symbol } } });
+    const state = {
+      game_id: game, state: 'Running', direction: 'Clockwise', winner: null,
+      players: [{ id: me, nick: 'Motion test', card_count: 3 }],
+      hand: [normal(18, 'Red', 'DrawTwo'), normal(35, 'Blue', 'Two'), { id: 0, card: { Wild: { symbol: 'ChooseColor' } } }],
+      top_card: { Normal: { color: 'Red', symbol: 'DrawTwo' } },
+      turn: { current_player: me, color: 'Red', pending_draw: 2, playable: [18, 0] },
+    };
+    let reject = false;
+    await page.addInitScript(() => sessionStorage.setItem('eins.player-code', 'motion-test'));
+    await page.route('**/api/**', async route => {
+      const path = new URL(route.request().url()).pathname;
+      if (path === '/api/events') return route.abort();
+      if (path === '/api/player/me') return route.fulfill({ json: { player: {
+        id: me, nick: 'Motion test', code: 'motion-test', last_activity: '2026-01-01T00:00:00Z', state: { GameJoined: game },
+      } } });
+      if (path === '/api/game/me') return route.fulfill({ json: state });
+      if (reject) return route.fulfill({ status: 409, body: 'Move rejected' });
+      if (path === '/api/game/play') {
+        const move = route.request().postDataJSON();
+        state.top_card = state.hand.find(card => card.id === move.card).card;
+        state.hand = state.hand.filter(card => card.id !== move.card);
+        if (move.color) state.turn.color = move.color;
+        if (move.card === 18) state.turn.pending_draw = 4;
+      } else if (path === '/api/game/draw') {
+        state.hand.push(...[58, 59, 60, 61].map((id, i) => normal(id, 'Orange', ['Zero', 'One', 'Two', 'Three'][i])));
+        state.turn.pending_draw = 0;
+      }
+      state.players[0].card_count = state.hand.length;
+      return route.fulfill({ json: null });
+    });
+    await page.goto('/');
+    await expect(page.locator('.hand .card')).toHaveCount(3);
+    await expect(page.locator('.card-flight')).toHaveCount(0);
+
+    // Freeze only the visual timeline, not requests or Yew, so endpoint geometry
+    // can be checked independently of machine speed and the easing curve.
+    const arm = () => page.evaluate(() => {
+      window.flightsSeen = 0;
+      window.motionObserver = new MutationObserver(() => {
+        for (const card of document.querySelectorAll('.card-flight')) {
+          for (const animation of card.getAnimations()) {
+            if (animation.playState === 'running') {
+              animation.pause();
+              animation.currentTime = 0;
+              window.flightsSeen++;
+            }
+          }
+        }
+      });
+      window.motionObserver.observe(document.body, { childList: true });
+    });
+    const center = locator => locator.evaluate(element => {
+      const r = element.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    });
+    const checkTravel = async (from, target, count) => {
+      await expect.poll(() => page.evaluate(() => window.flightsSeen)).toBe(count);
+      const flight = page.locator('.card-flight');
+      const positions = await flight.evaluateAll(cards => cards.filter(card => card.getAnimations().length).map(card => {
+        const a = card.getAnimations()[0];
+        const position = () => { const r = card.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; };
+        const start = position();
+        const { delay, duration } = a.effect.getTiming();
+        a.currentTime = delay + duration * 0.35;
+        const middle = position();
+        a.currentTime = delay + duration - 0.01;
+        return { start, middle, end: position(), hidden: card.getAttribute('aria-hidden') };
+      }));
+      const to = await center(target);
+      for (const position of positions) {
+        expect(position.hidden).toBe('true');
+        expect(Math.hypot(position.start.x - from.x, position.start.y - from.y)).toBeLessThan(2);
+        expect(Math.hypot(position.middle.x - from.x, position.middle.y - from.y)).toBeGreaterThan(20);
+      }
+      const last = positions.at(-1).end;
+      expect(Math.hypot(last.x - to.x, last.y - to.y)).toBeLessThan(2);
+      await page.evaluate(() => {
+        window.motionObserver.disconnect();
+        for (const card of document.querySelectorAll('.card-flight')) for (const animation of card.getAnimations()) animation.finish();
+      });
+      await expect(page.locator('.card-flight')).toHaveCount(0);
+      await expect(target).not.toHaveCSS('opacity', '0');
+    };
+
+    const red = page.getByRole('button', { name: 'Play Red +2', exact: true });
+    // A failed request must not invent a successful play or leave a hidden card.
+    reject = true;
+    await red.click();
+    await expect(page.getByRole('alert')).toContainText('Move rejected');
+    await expect(page.locator('.card-flight')).toHaveCount(0);
+    await expect(red).toBeVisible();
+    reject = false;
+    await page.getByRole('button', { name: 'Retry refresh' }).click();
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    await page.mouse.move(0, 0);
+    await expect(red).toHaveCSS('transform', 'none');
+    await expect(red).toBeEnabled();
+    await arm();
+    const origin = await center(red);
+    await red.press('Enter');
+    await checkTravel(origin, page.locator('.discard'), 1);
+    await expect(page.locator('.discard')).toHaveAttribute('aria-label', 'Top card: Red +2');
+
+    await arm();
+    const deck = await center(page.locator('.deck'));
+    await page.getByRole('button', { name: 'Draw 4 cards', exact: true }).click();
+    await checkTravel(deck, page.getByRole('button', { name: 'Play Orange 3', exact: true }), 4);
+    await expect(page.locator('.hand .card')).toHaveCount(6);
+
+    // Choosing/cancelling a wild is not a play; reduced motion skips travel entirely.
+    await page.getByRole('button', { name: 'Play Wild ✦', exact: true }).click();
+    await expect(page.locator('.card-flight')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await arm();
+    await page.getByRole('button', { name: 'Play Wild ✦', exact: true }).click();
+    await page.getByRole('button', { name: 'Green', exact: true }).click();
+    await expect(page.locator('.hand .card')).toHaveCount(5);
+    await expect(page.locator('.active-color')).toHaveText('Green');
+    expect(await page.evaluate(() => window.flightsSeen)).toBe(0);
+    await expect(page.locator('.card-flight')).toHaveCount(0);
+  });
+}

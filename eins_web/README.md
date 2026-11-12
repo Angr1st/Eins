@@ -40,6 +40,10 @@ Wild cards open a color chooser; Escape
 cancels. Call Eins before playing down to one card. Draw and leave use the same
 server rules as the terminal client.
 
+Confirmed plays slide from your hand onto the discard pile. Drawn cards travel
+from the deck into your hand, with staggered arrivals for penalties. These
+effects respect reduced motion and never delay game-state updates.
+
 ## Preview in an Amp orb
 
 `.agents/setup` installs the toolchain and dependencies. `.amp/services.yaml`
