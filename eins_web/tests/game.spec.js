@@ -91,6 +91,9 @@ test('two browsers share a private table, moves, and the result', async ({ brows
       const hand = await view(player);
       const cards = player.getByRole('button', { name: /^Play / });
       await expect(player.locator('.hand button:enabled')).toHaveCount(hand.hand.length);
+      // Draw animations temporarily hide their destination cards. Compare the
+      // resting hand so animation progress is not mistaken for a legal-card hint.
+      await expect(player.locator('.card-flight')).toHaveCount(0);
       const appearances = await cards.evaluateAll(cards => cards.map(card => {
         const style = getComputedStyle(card);
         return [style.opacity, style.boxShadow, style.borderColor];
