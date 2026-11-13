@@ -187,12 +187,23 @@ impl App {
                     <button class="quiet" disabled={self.busy} onclick={link.callback(|_| Msg::Act(Action::LeaveGame))}>{if view.winner.is_some() { "Back to lobby →" } else { "Leave game" }}</button>
                 </div>
                 <div class="players">{for view.players.iter().map(|player| html! {
-                    <div class={classes!("player", (Some(player.id) == current).then_some("current"))} key={player.id.to_string()}>
+                    // Opponents' seats are where their card flights start and end.
+                    <div class={classes!("player", (Some(player.id) == current).then_some("current"))} key={player.id.to_string()}
+                        data-player={(player.id != my_id).then(|| player.id.to_string())} data-count={player.card_count.to_string()}>
                         <strong>{&player.nick}{if player.id == my_id { " (you)" } else { "" }}</strong>
                         <span>{format!("{} cards{}", player.card_count, if player.card_count == 1 { " · EINS!" } else { "" })}</span>
                     </div>
                 })}</div>
-                <div class="felt">
+                // A hatched table means someone else is playing; it turns solid on your turn.
+                // Children's animations bubble here too, so only the table's own bounce ends it.
+                <div class={classes!("felt", (view.turn.is_some() && !my_turn).then_some("their-turn"), self.table_bounce.then_some("bounce"))}
+                    onanimationend={link.batch_callback(|event: AnimationEvent| (event.animation_name() == "table-bounce").then_some(Msg::TableBounced))}>
+                    // The seat already says EINS! to screen readers; the bubble is the moment it was called.
+                    <div class="eins-calls" aria-hidden="true">{for self.eins_calls.iter().map(|&id| html! {
+                        <span class="eins-bubble" key={id.to_string()} data-seat={view.players.iter().position(|p| p.id == id).map(|seat| seat.to_string())} onanimationend={link.callback(move |_| Msg::ClearEinsCall(id))}>
+                            <svg class="eins-tail"><path/></svg><small>{if id == my_id { "You" } else { nick(id) }}</small>{"Eins!"}
+                        </span>
+                    })}</div>
                     <div class="table-caption"><span>{"ON THE TABLE"}</span><span>{match view.direction { GameDirection::Clockwise => "↻ Clockwise", GameDirection::CounterClockwise => "↺ Counterclockwise" }}</span></div>
                     <div class="piles"><div class="deck" aria-hidden="true">{"eins."}</div><div class={classes!("card", "discard", card_text(view.top_card).0)} aria-label={format!("Top card: {} {}", card_text(view.top_card).0, card_text(view.top_card).1)}>{card_face(view.top_card)}</div>
                         <div class="turn-info">if let Some(turn) = &view.turn {

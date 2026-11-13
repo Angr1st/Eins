@@ -78,7 +78,32 @@ small { display: block; color: #788273; font-size: 12px; margin-top: 13px; }
 .player strong { overflow-wrap: anywhere; }
 .player span { color: #74806f; white-space: nowrap; }
 .player.current { border-color: #729164; background: #eaf0df; }
+.felt { position: relative; }
+.eins-calls { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center; gap: 24px; pointer-events: none; }
+.eins-bubble { position: relative; display: flex; flex-direction: column; align-items: center; max-width: 45%; padding: 12px 30px 14px; border: 3px solid #cbb15e; border-radius: 24px; background: #e9cb78; color: #243d35; font-family: 'Outfit', sans-serif; font-size: 46px; font-weight: 800; letter-spacing: -1.5px; line-height: 1; box-shadow: 0 12px 30px #0f2a2259; animation: eins-call 2.6s ease-out both; }
+.eins-bubble small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 6px; font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: #6b5a24; }
+.eins-tail { position: absolute; left: -3px; top: -3px; width: calc(100% + 6px); height: calc(100% + 6px); overflow: visible; }
+.eins-tail path { fill: #e9cb78; stroke: #cbb15e; stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }
+@keyframes eins-call {
+  0% { opacity: 0; transform: scale(.4); }
+  10% { opacity: 1; transform: scale(1.12); }
+  16%, 85% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1); }
+}
+@keyframes eins-call-still {
+  0% { opacity: 0; }
+  6%, 85% { opacity: 1; }
+  100% { opacity: 0; }
+}
 .felt { border-radius: 20px; padding: 24px 32px 30px; background: #234f42; color: #f4f3db; box-shadow: inset 0 0 70px #122e292b; }
+.felt.their-turn { background: repeating-linear-gradient(135deg, #234f42 0 9px, #2c5b4c 9px 12px); }
+.felt.bounce { animation: table-bounce .55s cubic-bezier(.3,.6,.3,1); }
+@keyframes table-bounce {
+  0%, 100% { scale: 1; }
+  30% { scale: 1.025; }
+  55% { scale: .99; }
+  78% { scale: 1.006; }
+}
 .table-caption { display: flex; justify-content: space-between; color: #b1c2a7; font-size: 11px; letter-spacing: 1.5px; }
 .table-caption > :last-child { letter-spacing: 0; font-size: 13px; }
 .piles { display: flex; align-items: center; justify-content: center; gap: 26px; padding-top: 28px; }
@@ -94,7 +119,7 @@ small { display: block; color: #788273; font-size: 12px; margin-top: 13px; }
 .Orange { background: #a56820; }
 .Green { background: #417147; }
 .Wild { background: #343b42; }
-.deck { background: repeating-linear-gradient(45deg, #24483f 0px, #24483f 5px, #315b4d 5px, #315b4d 7px); display: grid; place-items: center; font-family: 'Outfit', sans-serif; font-size: 26px; font-weight: 800; transform: rotate(-7deg); }
+.deck { background: repeating-linear-gradient(45deg, #24483f 0px, #24483f 5px, #315b4d 5px, #315b4d 7px); color: #f4f3db; display: grid; place-items: center; font-family: 'Outfit', sans-serif; font-size: 26px; font-weight: 800; transform: rotate(-7deg); }
 .discard { transform: rotate(5deg); }
 .turn-info { width: 220px; margin-left: 24px; }
 .turn-info > span { font-size: 10px; letter-spacing: 2px; color: #b1c2a7; }
@@ -118,7 +143,10 @@ small { display: block; color: #788273; font-size: 12px; margin-top: 13px; }
   90% { translate: 3px; }
 }
 @keyframes card-rejected-still { from, to { translate: 0; } }
-.hand .card:hover:not(:disabled) { transform: translateY(-7px); }
+/* Touch screens keep :hover on the last tapped card, which would leave it raised. */
+@media (hover: hover) {
+  .hand .card:hover:not(:disabled) { transform: translateY(-7px); }
+}
 .hand .Red:hover:not(:disabled) { background: #b8493c; }
 .hand .Blue:hover:not(:disabled) { background: #336e94; }
 .hand .Orange:hover:not(:disabled) { background: #a56820; }
@@ -149,6 +177,7 @@ small { display: block; color: #788273; font-size: 12px; margin-top: 13px; }
   .players { gap: 8px; }
   .player { padding: 10px 12px; gap: 10px; font-size: 12px; }
   .felt { padding: 20px 18px 25px; }
+  .eins-bubble { font-size: 34px; padding: 10px 22px 12px; }
   .piles { gap: 18px; flex-wrap: wrap; }
   .turn-info { margin: 0; width: 100%; text-align: center; }
   .turn-info .active-color { display: inline; font-size: 20px; margin-left: 10px; }
@@ -163,4 +192,6 @@ small { display: block; color: #788273; font-size: 12px; margin-top: 13px; }
 @media (prefers-reduced-motion: reduce) {
   button { transition: none; }
   .hand .card.rejected { animation-name: card-rejected-still; }
+  .eins-bubble { animation-name: eins-call-still; }
+  .felt.bounce { animation: none; }
 }

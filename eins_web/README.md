@@ -41,8 +41,15 @@ cancels. Call Eins before playing down to one card. Draw and leave use the same
 server rules as the terminal client.
 
 Confirmed plays slide from your hand onto the discard pile. Drawn cards travel
-from the deck into your hand, with staggered arrivals for penalties. These
-effects respect reduced motion and never delay game-state updates.
+from the deck into your hand, with staggered arrivals for penalties. Other
+players' plays fly from their seat to the pile and turn face up on the way;
+cards they draw fly face down from the deck into their seat. When anyone plays
+down to one card with Eins called, an “Eins!” speech bubble with their name
+pops up in the middle of the table for a moment, its tail pointing at their
+seat (a call is sent with the play; forgetting it leaves three
+cards instead of one). The table is hatched while another player is on the
+move and solid on your turn, with a short bounce when it switches. These effects
+respect reduced motion and never delay game-state updates.
 
 ## Preview in an Amp orb
 

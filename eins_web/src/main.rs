@@ -18,6 +18,7 @@ extern "C" {
     fn capture_cards() -> JsValue;
     fn animate_cards(before: JsValue);
     fn cancel_card_motion();
+    fn point_eins_bubbles();
 }
 
 enum Prompt {
@@ -38,6 +39,8 @@ enum Msg {
     SubmitCode,
     SelectCard(CardReference),
     ClearRejectedCard(CardReference),
+    ClearEinsCall(Uuid),
+    TableBounced,
     PickColor(Color),
     ToggleEins,
 }
@@ -59,6 +62,10 @@ struct App {
     listener: Option<AbortHandle>,
     rejected_card: Option<CardReference>,
     card_layout: Option<JsValue>,
+    /// Players whose "Eins" speech bubble is showing.
+    eins_calls: Vec<Uuid>,
+    /// The table switched between someone else's turn and yours (or the end).
+    table_bounce: bool,
 }
 
 fn storage() -> Option<web_sys::Storage> {
@@ -161,6 +168,8 @@ impl Component for App {
             listener: None,
             rejected_card: None,
             card_layout: None,
+            eins_calls: Vec::new(),
+            table_bounce: false,
         };
         if app.api.code.is_some() {
             app.listen(ctx);
@@ -219,10 +228,29 @@ impl Component for App {
                             (Some(Screen::Game(old)), Screen::Game(new))
                                 if old.game_id == new.game_id =>
                             {
+                                // Calls are only sent with a play, and a play that leaves one
+                                // card is accepted only with Eins called (otherwise the
+                                // penalty leaves three), so this is when someone said it.
+                                for player in &new.players {
+                                    let was = old.players.iter().find(|p| p.id == player.id);
+                                    if player.card_count == 1
+                                        && was.is_some_and(|p| p.card_count > 1)
+                                        && !self.eins_calls.contains(&player.id)
+                                    {
+                                        self.eins_calls.push(player.id);
+                                    }
+                                }
+                                let me = snapshot.me.get_id();
+                                let theirs = |view: &eins_lib::game::GameView| {
+                                    view.turn.as_ref().is_some_and(|t| t.current_player != me)
+                                };
+                                self.table_bounce |= theirs(old) != theirs(new);
                                 Some(capture_cards())
                             }
                             _ => {
                                 cancel_card_motion();
+                                self.eins_calls.clear();
+                                self.table_bounce = false;
                                 None
                             }
                         };
@@ -329,6 +357,8 @@ impl Component for App {
                     self.rejected_card = None;
                 }
             }
+            Msg::ClearEinsCall(id) => self.eins_calls.retain(|call| *call != id),
+            Msg::TableBounced => self.table_bounce = false,
             Msg::PickColor(color) => {
                 if let Some(Prompt::Color(card)) = self.prompt {
                     if !self.busy && self.can_play(card) {
@@ -344,6 +374,9 @@ impl Component for App {
     fn rendered(&mut self, _: &Context<Self>, _: bool) {
         if let Some(before) = self.card_layout.take() {
             animate_cards(before);
+        }
+        if !self.eins_calls.is_empty() {
+            point_eins_bubbles();
         }
         if self.focus_prompt {
             let target = match self.prompt {

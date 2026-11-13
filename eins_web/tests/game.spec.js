@@ -73,12 +73,30 @@ test('two browsers share a private table, moves, and the result', async ({ brows
     const active = first.turn.current_player === first.players[0].id ? host : guest;
     const waiting = active === host ? guest : host;
     await expect(waiting.getByRole('button', { name: /^Draw / })).toBeDisabled();
+    // The table is hatched for whoever waits and solid for the player to move.
+    await expect(waiting.locator('.felt')).toHaveCSS('background-image', /repeating-linear-gradient/);
+    await expect(active.locator('.felt')).toHaveCSS('background-image', 'none');
+    expect((await waiting.locator('.felt').boundingBox()).width).toBe((await active.locator('.felt').boundingBox()).width);
+    // Passing the turn bounces both tables once as they swap patterns.
+    for (const page of pages) {
+      await page.evaluate(() => {
+        window.bounces = 0;
+        addEventListener('animationstart', event => { if (event.animationName === 'table-bounce') window.bounces++; });
+      });
+    }
     await expect(waiting.locator('.hand button:enabled')).toHaveCount(0);
     const beforeDraw = await view(active);
     const expectedCount = beforeDraw.hand.length + Math.max(1, beforeDraw.turn.pending_draw);
     await active.getByRole('button', { name: /^Draw / }).click();
     await expect(active.getByRole('button', { name: /^Play / })).toHaveCount(expectedCount);
     await expect(waiting.getByRole('heading', { name: 'Your move.', exact: true })).toBeVisible();
+    for (const page of pages) await expect.poll(() => page.evaluate(() => window.bounces)).toBe(1);
+    await expect(active.locator('.felt')).toHaveCSS('background-image', /repeating-linear-gradient/);
+    // And again when it comes back, once the first bounce has finished.
+    for (const page of pages) await expect(page.locator('.felt.bounce')).toHaveCount(0);
+    await waiting.getByRole('button', { name: /^Draw / }).click();
+    await expect(active.getByRole('heading', { name: 'Your move.', exact: true })).toBeVisible();
+    for (const page of pages) await expect.poll(() => page.evaluate(() => window.bounces)).toBe(2);
 
     // Find moves through the API: the UI must not identify legal cards for the player.
     let playedWild = false;
@@ -168,6 +186,7 @@ test('two browsers share a private table, moves, and the result', async ({ brows
     // A peer leaving ends the two-player game, then both can return to the lobby.
     await guest.getByRole('button', { name: 'Leave game', exact: true }).click();
     await expect(host.getByRole('heading', { name: 'You win!', exact: true })).toBeVisible();
+    await expect(host.locator('.felt')).toHaveCSS('background-image', 'none');
     await host.getByRole('button', { name: 'Back to lobby' }).click();
     for (const page of pages) await expect(page.getByRole('heading', { name: 'The lobby' })).toBeVisible();
     expect(errors).toEqual([]);
@@ -206,19 +225,27 @@ for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     const me = '00000000-0000-4000-8000-000000000001';
     const game = '00000000-0000-4000-8000-000000000002';
+    const rival = '00000000-0000-4000-8000-000000000003';
     const normal = (id, color, symbol) => ({ id, card: { Normal: { color, symbol } } });
     const state = {
       game_id: game, state: 'Running', direction: 'Clockwise', winner: null,
-      players: [{ id: me, nick: 'Motion test', card_count: 3 }],
+      players: [{ id: me, nick: 'Motion test', card_count: 3 }, { id: rival, nick: 'Rival', card_count: 7 }],
       hand: [normal(18, 'Red', 'DrawTwo'), normal(35, 'Blue', 'Two'), { id: 0, card: { Wild: { symbol: 'ChooseColor' } } }],
       top_card: { Normal: { color: 'Red', symbol: 'DrawTwo' } },
       turn: { current_player: me, color: 'Red', pending_draw: 2, playable: [18, 0] },
     };
     let reject = false;
+    // Opponent moves arrive like real ones: a (re)connected event stream triggers a refresh.
+    let push = false;
+    const opponentMove = change => { change(); push = true; };
     await page.addInitScript(() => sessionStorage.setItem('eins.player-code', 'motion-test'));
     await page.route('**/api/**', async route => {
       const path = new URL(route.request().url()).pathname;
-      if (path === '/api/events') return route.abort();
+      if (path === '/api/events') {
+        if (!push) return route.abort();
+        push = false;
+        return route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' });
+      }
       if (path === '/api/player/me') return route.fulfill({ json: { player: {
         id: me, nick: 'Motion test', code: 'motion-test', last_activity: '2026-01-01T00:00:00Z', state: { GameJoined: game },
       } } });
@@ -264,6 +291,8 @@ for (const width of [1280, 390]) {
     });
     const checkTravel = async (from, target, count) => {
       await expect.poll(() => page.evaluate(() => window.flightsSeen)).toBe(count);
+      // A seat is measured once its new card count has rendered.
+      if (from.evaluate) from = await center(from);
       const flight = page.locator('.card-flight');
       const positions = await flight.evaluateAll(cards => cards.filter(card => card.getAnimations().length).map(card => {
         const a = card.getAnimations()[0];
@@ -316,6 +345,25 @@ for (const width of [1280, 390]) {
     await checkTravel(deck, page.getByRole('button', { name: 'Play Orange 3', exact: true }), 4);
     await expect(page.locator('.hand .card')).toHaveCount(6);
 
+    // Opponents' penalties fly face down from the deck into their seat.
+    const rivalSeat = page.locator('.player[data-player]');
+    await expect(rivalSeat).toHaveCount(1);
+    await arm();
+    opponentMove(() => { state.players[1].card_count += 2; });
+    await expect(rivalSeat).toContainText('9 cards');
+    await expect(page.locator('.card-flight .flight-back')).toHaveCount(0);
+    await checkTravel(deck, rivalSeat, 2);
+
+    // An opponent's play turns face up on its way from their seat to the pile.
+    await arm();
+    opponentMove(() => {
+      state.players[1].card_count -= 1;
+      state.top_card = { Normal: { color: 'Green', symbol: 'Seven' } };
+    });
+    await expect(page.locator('.discard')).toHaveAttribute('aria-label', 'Top card: Green 7');
+    await expect(page.locator('.card-flight .flight-back')).toHaveCount(1);
+    await checkTravel(rivalSeat, page.locator('.discard'), 1);
+
     // Choosing/cancelling a wild is not a play; reduced motion skips travel entirely.
     await page.getByRole('button', { name: 'Play Wild ✦', exact: true }).click();
     await expect(page.locator('.card-flight')).toHaveCount(0);
@@ -326,7 +374,105 @@ for (const width of [1280, 390]) {
     await page.getByRole('button', { name: 'Green', exact: true }).click();
     await expect(page.locator('.hand .card')).toHaveCount(5);
     await expect(page.locator('.active-color')).toHaveText('Green');
+    opponentMove(() => { state.players[1].card_count += 1; });
+    await expect(rivalSeat).toContainText('9 cards');
     expect(await page.evaluate(() => window.flightsSeen)).toBe(0);
     await expect(page.locator('.card-flight')).toHaveCount(0);
+
+    // A play down to one card was accepted with Eins called; the seat says so
+    // briefly in a speech bubble on the table (still shown, without movement, in reduced motion).
+    const bubble = page.locator('.eins-bubble');
+    opponentMove(() => { state.players[1].card_count = 2; });
+    await expect(rivalSeat).toContainText('2 cards');
+    opponentMove(() => { state.players[1].card_count = 3; });
+    await expect(rivalSeat).toContainText('3 cards');
+    await expect(bubble).toHaveCount(0);
+    opponentMove(() => { state.players[1].card_count = 1; });
+    await expect(page.locator('.felt .eins-bubble')).toHaveText('RivalEins!');
+    // Its tail sticks out toward the caller's seat: nearer to it, and on its side.
+    const aim = await page.evaluate(() => {
+      const center = element => {
+        const r = element.getBoundingClientRect();
+        return [r.x + r.width / 2, r.y + r.height / 2];
+      };
+      const seat = center(document.querySelector('.player[data-player]'));
+      const bubble = center(document.querySelector('.eins-bubble'));
+      const path = document.querySelector('.eins-tail path');
+      if (!path.getBoundingClientRect().width) return null;
+      const tail = center(path);
+      const distance = point => Math.hypot(point[0] - seat[0], point[1] - seat[1]);
+      return { closer: distance(bubble) - distance(tail), side: Math.sign(seat[0] - bubble[0]) * (tail[0] - bubble[0]) };
+    });
+    expect(aim.closer).toBeGreaterThan(20);
+    expect(aim.side).toBeGreaterThan(0);
+    await expect(bubble).toHaveCSS('animation-name', 'eins-call-still');
+    await expect(bubble).toHaveCount(0);
+    await expect(rivalSeat).toContainText('1 cards · EINS!');
   });
 }
+
+test('on a touch screen, hand cards stay level and a play from a vanishing row still flies', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 664 }, isMobile: true, hasTouch: true });
+  try {
+    const page = await context.newPage();
+    const me = '00000000-0000-4000-8000-000000000001';
+    const game = '00000000-0000-4000-8000-000000000002';
+    const normal = (id, color, symbol) => ({ id, card: { Normal: { color, symbol } } });
+    // Four cards fill the first row at this width, so the fifth sits alone in the second.
+    const hand = ['One', 'Two', 'Three', 'Four', 'Five'].map((symbol, i) => normal(40 + i, 'Red', symbol));
+    hand.splice(1, 1, normal(41, 'Blue', 'Two'));
+    const state = {
+      game_id: game, state: 'Running', direction: 'Clockwise', winner: null,
+      players: [{ id: me, nick: 'Touch test', card_count: 5 }],
+      hand, top_card: { Normal: { color: 'Red', symbol: 'Zero' } },
+      turn: { current_player: me, color: 'Red', pending_draw: 0, playable: [40, 42, 43, 44] },
+    };
+    await page.addInitScript(() => sessionStorage.setItem('eins.player-code', 'touch-test'));
+    await page.route('**/api/**', async route => {
+      const path = new URL(route.request().url()).pathname;
+      if (path === '/api/events') return route.abort();
+      if (path === '/api/player/me') return route.fulfill({ json: { player: {
+        id: me, nick: 'Touch test', code: 'touch-test', last_activity: '2026-01-01T00:00:00Z', state: { GameJoined: game },
+      } } });
+      if (path === '/api/game/me') return route.fulfill({ json: state });
+      const move = route.request().postDataJSON();
+      state.top_card = state.hand.find(card => card.id === move.card).card;
+      state.hand = state.hand.filter(card => card.id !== move.card);
+      state.players[0].card_count = state.hand.length;
+      return route.fulfill({ json: null });
+    });
+    await page.goto('/');
+    const cards = page.locator('.hand .card');
+    await expect(cards).toHaveCount(5);
+
+    // Touch keeps :hover on the tapped card; it must not stay raised above the others.
+    const blue = page.getByRole('button', { name: 'Play Blue 2', exact: true });
+    await blue.tap();
+    await expect(blue).toHaveCSS('box-shadow', /rgb\(201, 45, 38\)/);
+    await expect(blue).toHaveCSS('transform', 'none');
+
+    // Playing the last card of the bottom row shortens the page. The browser's own
+    // scroll must not cancel the flight, which would make the card vanish mid-air.
+    const last = page.getByRole('button', { name: 'Play Red 5', exact: true });
+    const tops = await cards.evaluateAll(cards => cards.map(card => card.getBoundingClientRect().top));
+    expect(new Set(tops).size).toBe(2);
+    await page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
+    await page.evaluate(() => {
+      window.flightLife = new Promise(resolve => {
+        let start;
+        new MutationObserver(records => {
+          for (const record of records) {
+            if ([...record.addedNodes].some(node => node.classList?.contains('card-flight'))) start ??= performance.now();
+            if (start && [...record.removedNodes].some(node => node.classList?.contains('card-flight'))) resolve(performance.now() - start);
+          }
+        }).observe(document.body, { childList: true });
+      });
+    });
+    await last.tap();
+    await expect(cards).toHaveCount(4);
+    expect(await page.evaluate(() => window.flightLife)).toBeGreaterThan(400);
+    await expect(page.locator('.hand')).toHaveCSS('min-height', '0px');
+  } finally {
+    await context.close();
+  }
+});
