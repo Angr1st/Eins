@@ -17,9 +17,15 @@ Confirm availability before activation. The module does not modify their
 services, directories, credentials, routes, or firewall settings. All three
 Eins services run as non-root dynamic users.
 
+`package.nix` packages only the server binary and `web.nix` packages only the
+compiled website, so a website-only update changes just the `eins-web` Nginx
+root and leaves the game server running. Nginx serves `.webmanifest` as
+`application/manifest+json`; `index.html` links it with
+`crossorigin="use-credentials"` so browsers send the Access cookie when fetching it.
+
 ## Current deployment
 
-Deployed on 9 November 2026 at **https://eins.angr1st.com**, restricted through
+First deployed on 9 November 2026 at **https://eins.angr1st.com**, restricted through
 Cloudflare Access to **Torben and Alina**. Email OTP is the only login method,
 sessions last 24 hours, and there is no bypass policy. The tunnel validates the
 Eins Access application's JWT before forwarding requests to the origin.
@@ -32,6 +38,15 @@ Eins Access application's JWT before forwarding requests to the origin.
 - Tunnel: `eins-hostinger`, ID `fa206955-46a7-4ac1-a2af-0bffbef432bc`.
 - Access application: `Eins`, ID `78fb8f7b-06ef-42e0-b58c-7ed882c8ea51`.
 - Host configuration backup: `/etc/nixos/configuration-before-eins.nix`.
+
+Since 11 November 2026 the website has been updated without restarting the game
+server. On 12 November 2026 (NixOS generation 13) the site was updated to release
+`97173295ec12-archive-909a6b5e9957`, built from commit
+`97173295ec121e1fd97b5a82304351cc25e1e57d`. The server still runs the binary from
+release `8516acc12d9c-archive-8789f712fe4e`, which is byte-identical to that
+commit's. The website-only split and manifest MIME type in this directory match
+that host configuration. Earlier releases are kept under `/opt/eins/releases/`,
+and the original release at `/opt/eins/current.before-ebcf900`.
 
 The deployment activated NixOS generation 8. Only the three Eins services
 started; Grocer, Square, SSH, and firewall units were unchanged. All seven
@@ -78,7 +93,8 @@ Eins-only configuration.
 
 1. Coordinate with other deployments: `nixos-rebuild switch` activates the
    **whole host**, not just Eins. Check for other rebuilds and staged app changes.
-2. Transfer `deployment/nixos.nix`, `deployment/package.nix`, and the generated
+2. Transfer `deployment/nixos.nix`, `deployment/package.nix`,
+   `deployment/web.nix`, and the generated
    `deployment/bundle/` into `/opt/eins/releases/<revision>/deployment/` using
    pinned-host-key SSH. Never disable SSH host-key checking. Credentials from
    other Amp projects are not automatically available in this project.
@@ -86,9 +102,10 @@ Eins-only configuration.
 
    ```sh copy Copy Package Build
    nix-build --no-out-link -E 'with import <nixpkgs> {}; callPackage /opt/eins/releases/REVISION/deployment/package.nix {}'
+   nix-build --no-out-link -E 'with import <nixpkgs> {}; callPackage /opt/eins/releases/REVISION/deployment/web.nix {}'
    ```
 
-   Replace `REVISION` with the staged revision. Keep the resulting Nix store path
+   Replace `REVISION` with the staged revision. Keep the resulting Nix store paths
    and source revision for rollback.
 4. Install the staged release at `/opt/eins/current` as a **real directory**.
    Preserve any previous release separately. Add
@@ -144,7 +161,8 @@ client does not implement Access login. Without Access, it can connect using
   `[::]`. Verify direct-IP access fails from another machine on both public IPv4
   and IPv6, including HTTPS with the Eins hostname/SNI directed to the VPS IP.
 - Check the HTTPS site's `/api/health`, `.wasm` MIME type (`application/wasm`),
-  and two-player gameplay. SSE at `/api/events` must update the other player
+  `/manifest.webmanifest` MIME type (`application/manifest+json`), and
+  two-player gameplay. SSE at `/api/events` must update the other player
   without reloads. Nginx forwards the `code` header and strips `/api/`.
 - Verify Grocer and Square remain healthy after every whole-system switch.
 - In a maintenance window, stopping **only** `eins-tunnel` should make uncached
@@ -154,6 +172,18 @@ client does not implement Access login. Without Access, it can connect using
   If activation fails, restore the previous Eins directory/configuration and
   rebuild. Do not blindly run a whole-system rollback: it can undo another
   app's deployment. Never restore Grocer/Square data as part of an Eins rollback.
+
+### Website-only updates
+
+When only `eins_web` changed, keep the deployed `bundle/eins_server` and replace
+only `bundle/public/`. Before switching, build with `nixos-rebuild build` and
+compare the result with `/run/current-system`: `eins.service` must be
+byte-identical and only `eins-web.service` may change. The switch then restarts
+only Nginx; open SSE connections drop briefly and the browser reconnects.
+
+The first switch to this directory's `package.nix` changes the server's store
+path once (its source no longer includes the website), so that switch restarts
+`eins` even though the binary is unchanged. Schedule it like a server update.
 
 **Restarting Eins ends every game and player session.** State is in memory;
 there is no game database or persistent volume. NixOS rollback does not recover

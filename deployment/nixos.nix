@@ -3,6 +3,7 @@
 { pkgs, ... }:
 let
   eins = pkgs.callPackage ./package.nix { };
+  web = pkgs.callPackage ./web.nix { };
   nginxConfig = pkgs.writeText "eins-nginx.conf" ''
     daemon off;
     worker_processes 1;
@@ -11,6 +12,7 @@ let
     events { worker_connections 1024; }
     http {
       include ${pkgs.nginx}/conf/mime.types;
+      types { application/manifest+json webmanifest; }
       default_type application/octet-stream;
       access_log off;
       client_body_temp_path /run/eins-web/client_body;
@@ -21,7 +23,7 @@ let
       server {
         listen 127.0.0.1:8082;
         server_name _;
-        root ${eins}/share/eins;
+        root ${web}/share/eins;
         index index.html;
         location /api/ {
           proxy_pass http://127.0.0.1:8080/;
