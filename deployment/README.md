@@ -30,41 +30,49 @@ Cloudflare Access to **Torben and Alina**. Email OTP is the only login method,
 sessions last 24 hours, and there is no bypass policy. The tunnel validates the
 Eins Access application's JWT before forwarding requests to the origin.
 
-- Release: `97173295ec12-archive-909a6b5e9957` (website from master
-  `97173295ec121e1fd97b5a82304351cc25e1e57d`, with the unchanged backend retained).
-- Archive SHA256: `909a6b5e9957a90e32f06c36b2bd9f7dccf973a2932444856a8e896b40fc96f2`.
-- Active release: `/opt/eins/current`, a real directory. Release record:
+- Release: `93f55e9ea5b4-archive-169789ea0336` (website from master
+  `93f55e9ea5b417b16bf419d3aacf4dfd1637debb`, with the running backend retained).
+- Archive SHA256: `169789ea03360f5bd84cf8445961d6f9423223105ae52a0d22a51c1b5ac581b5`.
+- Active release: `/opt/eins/current`, a real directory holding the live
+  `deployment/` and the verbatim archive in `archive/`. Release record:
   `/opt/eins/deployed-release`; staged copy under `/opt/eins/releases/`.
 - Tunnel: `eins-hostinger`, ID `fa206955-46a7-4ac1-a2af-0bffbef432bc`.
 - Access application: `Eins`, ID `78fb8f7b-06ef-42e0-b58c-7ed882c8ea51`.
 - Host configuration backup: `/etc/nixos/configuration-before-eins.nix`.
 
-Since 11 November 2026 the website has been updated without restarting the game
-server. On 12 November 2026 (NixOS generation 13) the site was updated to release
-`97173295ec12-archive-909a6b5e9957`, built from commit
-`97173295ec121e1fd97b5a82304351cc25e1e57d`. The server still runs the binary from
-release `8516acc12d9c-archive-8789f712fe4e`, which is byte-identical to that
-commit's. `nixos.nix` matches the live module, including the separate website root
-and manifest MIME type. The live packaging still preserves the original full
-backend bundle and uses a separate `public/` directory; it has not migrated to
-this repository's server-only `package.nix` and `bundle/public`-based `web.nix`.
-See the one-time restart warning under Website-only updates before adopting
-these package definitions. Earlier releases are kept under `/opt/eins/releases/`,
-and the original release at `/opt/eins/current.before-ebcf900`.
+Production uses this repository's packaging: the live `nixos.nix`, `package.nix`
+and `web.nix` are byte-identical to the ones in `deployment/`. The migration to
+the server-only `package.nix` happened on 13 November 2026 with release
+`9cb80cf1d329-bundle-909a6b5e9957` (NixOS generation 14), which restarted `eins`
+once at 07:28 UTC. The backend package is
+`/nix/store/6mr06x83ck9541kgmzhynhfcj56sqhvq-eins-0.1.0`; its binary
+(SHA256 `ce1d0742…`) is the one built for commit
+`97173295ec121e1fd97b5a82304351cc25e1e57d`. Server and library source are
+unchanged since then.
 
-The generation 13 switch restarted only `eins-web`. The backend, Grocer,
-Square, Mellow, tunnels, SSH, and firewall units were unchanged. All ten checked
-units were active with no failed units. All ten website files matched the
-release; origin health, MIME types, authentication headers, and unbuffered SSE
-notifications passed. Anonymous public website and API requests redirected to
-Eins's Access login; HTTP redirected to HTTPS.
+Later on 13 November 2026 (generation 15) the website was updated to release
+`93f55e9ea5b4-archive-169789ea0336` by replacing only `bundle/public/` and
+bumping `web.nix`'s version; the archive's own `eins_server` was not used. The
+web package is `/nix/store/9nhd69jg2wbvjpy0ga94q6b9is97hm1r-eins-web-93f55e9ea5b4`.
+A build comparison against `/run/current-system` showed only the `eins-web`
+Nginx root changing, and the switch restarted only `eins-web`. The `eins` PID,
+Grocer, Square, Mellow, tunnels, SSH, and firewall were unchanged; all ten
+checked units were active with no failed units. All served website files
+matched the release; origin health, MIME types, authentication headers, and
+unbuffered SSE notifications passed. Anonymous public website and API requests
+redirected to Eins's Access login; HTTP redirected to HTTPS.
 
-Two players completed a game after deployment, but their browser-loaded asset
-versions were not inspected. An independent authenticated browser check of the
-new assets remains useful. A direct-IP probe from an independent external
-network is also still needed; the orb's outbound proxy makes that test
-inconclusive. All origin listeners were verified as loopback-only and the
-firewall unchanged.
+Rollback: restore `/opt/eins/releases/9cb80cf1d329-bundle-909a6b5e9957` to
+`/opt/eins/current` and rebuild; it uses the same server package, so only
+`eins-web` restarts. Releases from `97173295ec12…` and earlier use the pre-split
+packaging, and returning to one restarts `eins`. The original release is at
+`/opt/eins/current.before-ebcf900`.
+
+Browser tabs opened before a website update still reference the previous asset
+hashes, which then return 404; reload them. No authenticated browser check of
+the current assets has been made: agent threads cannot sign in through Access. A direct-IP probe from an independent external network is also
+still needed; the orb's outbound proxy makes that test inconclusive. All origin
+listeners were verified as loopback-only and the firewall unchanged.
 
 An explicit Cloudflare cache-bypass rule for this hostname's `/api/*` has **not**
 been added: the deployment credential lacks ruleset permissions. Nginx sends
@@ -187,9 +195,9 @@ compare the result with `/run/current-system`: `eins.service` must be
 byte-identical and only `eins-web.service` may change. The switch then restarts
 only Nginx; open SSE connections drop briefly and the browser reconnects.
 
-The first switch to this directory's `package.nix` changes the server's store
-path once (its source no longer includes the website), so that switch restarts
-`eins` even though the binary is unchanged. Schedule it like a server update.
+Production adopted this directory's server-only `package.nix` in generation 14,
+so website-only updates no longer change the server's store path. Changing the
+server binary still restarts `eins`; schedule that like a server update.
 
 **Restarting Eins ends every game and player session.** State is in memory;
 there is no game database or persistent volume. NixOS rollback does not recover
