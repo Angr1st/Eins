@@ -30,9 +30,9 @@ Cloudflare Access to **Torben and Alina**. Email OTP is the only login method,
 sessions last 24 hours, and there is no bypass policy. The tunnel validates the
 Eins Access application's JWT before forwarding requests to the origin.
 
-- Release: `8516acc12d9c-archive-8789f712fe4e` (application source plus the
-  deployment configuration in that archive, not just a Git revision).
-- Archive SHA256: `8789f712fe4e4de46663ebaf23a82b6afe0fe01fbcd9764e92493a19b5c80173`.
+- Release: `97173295ec12-archive-909a6b5e9957` (website from master
+  `97173295ec121e1fd97b5a82304351cc25e1e57d`, with the unchanged backend retained).
+- Archive SHA256: `909a6b5e9957a90e32f06c36b2bd9f7dccf973a2932444856a8e896b40fc96f2`.
 - Active release: `/opt/eins/current`, a real directory. Release record:
   `/opt/eins/deployed-release`; staged copy under `/opt/eins/releases/`.
 - Tunnel: `eins-hostinger`, ID `fa206955-46a7-4ac1-a2af-0bffbef432bc`.
@@ -44,21 +44,27 @@ server. On 12 November 2026 (NixOS generation 13) the site was updated to releas
 `97173295ec12-archive-909a6b5e9957`, built from commit
 `97173295ec121e1fd97b5a82304351cc25e1e57d`. The server still runs the binary from
 release `8516acc12d9c-archive-8789f712fe4e`, which is byte-identical to that
-commit's. The website-only split and manifest MIME type in this directory match
-that host configuration. Earlier releases are kept under `/opt/eins/releases/`,
+commit's. `nixos.nix` matches the live module, including the separate website root
+and manifest MIME type. The live packaging still preserves the original full
+backend bundle and uses a separate `public/` directory; it has not migrated to
+this repository's server-only `package.nix` and `bundle/public`-based `web.nix`.
+See the one-time restart warning under Website-only updates before adopting
+these package definitions. Earlier releases are kept under `/opt/eins/releases/`,
 and the original release at `/opt/eins/current.before-ebcf900`.
 
-The deployment activated NixOS generation 8. Only the three Eins services
-started; Grocer, Square, SSH, and firewall units were unchanged. All seven
-application/tunnel services were active with zero restarts. Origin health,
-assets, authentication headers, and two-player SSE notifications passed.
-Anonymous public website and API requests redirected to Eins's Access login;
-HTTP redirected to HTTPS.
+The generation 13 switch restarted only `eins-web`. The backend, Grocer,
+Square, Mellow, tunnels, SSH, and firewall units were unchanged. All ten checked
+units were active with no failed units. All ten website files matched the
+release; origin health, MIME types, authentication headers, and unbuffered SSE
+notifications passed. Anonymous public website and API requests redirected to
+Eins's Access login; HTTP redirected to HTTPS.
 
-Remaining verification: an approved player must complete email OTP login and
-play through Cloudflare. A direct-IP probe from an independent external network
-is also still needed; the orb's outbound proxy makes that test inconclusive.
-All origin listeners were verified as loopback-only and the firewall unchanged.
+Two players completed a game after deployment, but their browser-loaded asset
+versions were not inspected. An independent authenticated browser check of the
+new assets remains useful. A direct-IP probe from an independent external
+network is also still needed; the orb's outbound proxy makes that test
+inconclusive. All origin listeners were verified as loopback-only and the
+firewall unchanged.
 
 An explicit Cloudflare cache-bypass rule for this hostname's `/api/*` has **not**
 been added: the deployment credential lacks ruleset permissions. Nginx sends
@@ -88,8 +94,8 @@ together when staging a release. Build on the same architecture as the VPS.
 The shared VPS is `root@187.126.31.101`, running NixOS 26.05. Preserve
 `/etc/nixos/configuration.nix`, including Hostinger's boot/network/SSH settings
 and the imports for `/opt/grocer/source/deployment/nixos.nix` and
-`/opt/square/current/deployment/nixos.nix`. Do not replace that file with an
-Eins-only configuration.
+`/opt/square/current/deployment/nixos.nix`, plus the existing Mellow module.
+Do not replace that file with an Eins-only configuration.
 
 1. Coordinate with other deployments: `nixos-rebuild switch` activates the
    **whole host**, not just Eins. Check for other rebuilds and staged app changes.
@@ -164,7 +170,7 @@ client does not implement Access login. Without Access, it can connect using
   `/manifest.webmanifest` MIME type (`application/manifest+json`), and
   two-player gameplay. SSE at `/api/events` must update the other player
   without reloads. Nginx forwards the `code` header and strips `/api/`.
-- Verify Grocer and Square remain healthy after every whole-system switch.
+- Verify Grocer, Square, and Mellow remain healthy after every whole-system switch.
 - In a maintenance window, stopping **only** `eins-tunnel` should make uncached
   public API requests fail while loopback health remains good; then restart it.
 - Stage/build each update before replacing `/opt/eins/current`, preserve the
